@@ -15,6 +15,8 @@ const cache = new Map<string, { at: number; data: Preview }>()
 let timer: ReturnType<typeof setTimeout> | null = null
 let pop: HTMLDivElement | null = null
 let currentKey: string | null = null
+/** Counts hovers, so a reply that arrives after the pointer moved on (even back to the same card) is dropped. */
+let hover = 0
 
 /** Plain text from the agent's markdown: drops emphasis markers and code fences, keeps line breaks. */
 function plain(text: string): string {
@@ -78,7 +80,9 @@ export function hidePreview(): void {
   if (timer) clearTimeout(timer)
   timer = null
   currentKey = null
+  hover++
   document.removeEventListener('mousemove', onMove, true)
+  document.documentElement.removeEventListener('mouseleave', hidePreview)
   const old = pop
   pop = null
   if (!old) return
@@ -96,7 +100,10 @@ function onMove(e: MouseEvent): void {
 export function schedulePreview(key: string, anchor: HTMLElement): void {
   hidePreview()
   currentKey = key
+  const mine = hover
   document.addEventListener('mousemove', onMove, true)
+  // The pointer can leave the panel while its card is being redrawn, and then no card hears it.
+  document.documentElement.addEventListener('mouseleave', hidePreview)
   const warm = Date.now() - lastShownAt < WARM_WINDOW_MS
   timer = setTimeout(async () => {
     timer = null
@@ -106,7 +113,7 @@ export function schedulePreview(key: string, anchor: HTMLElement): void {
     } catch {
       return
     }
-    if (currentKey !== key) return
+    if (hover !== mine) return
     const target = document.querySelector(`.card[data-key="${CSS.escape(key)}"]`) ?? anchor
     pop = render(data)
     document.body.append(pop)
