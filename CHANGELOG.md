@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Sync with the Workspace Board** (off by default): columns become Orca's workspace statuses. Dragging a chat sets its workspace's status, and moving a workspace on Orca's board moves its chats. Turn it on in Settings or with the ⇄ button.
+- **Windows:** the board listed nothing because Orca starts plugin workers without `APPDATA`, which `orca.exe` needs. The worker now passes it. A failing CLI call also shows the CLI's own reason.
+
 ## 1.1.1
 
 - **Monitoring pulse for background work:** a chat whose turn ended while background commands, monitors, crons or subagents are still running now shows the monitoring pulse instead of the working spinner. This follows Orca's own rule and works for any agent.

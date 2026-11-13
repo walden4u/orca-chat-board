@@ -482,7 +482,8 @@ function renderColumn(col: Column, i: number, columns: Column[], cards: CardView
       right.onclick = () => swap(i + 1)
       head.append(right)
     }
-    if (columns.length > 1) {
+    // Synced columns are Orca's workspace statuses: they are added and removed in Orca.
+    if (columns.length > 1 && !view?.synced) {
       const confirming = confirmDeleteColumn === col.id
       const del = el(
         'button',
@@ -547,7 +548,16 @@ function render(force = false): void {
     void saveColumns([...view.columns, { id, title: t.newColumn }])
   }
 
-  const children: Node[] = [el('div', { class: 'toolbar' }, search, addCol, refresh)]
+  const sync = el(
+    'button',
+    { class: `ghost${view?.synced ? ' on' : ''}`, title: view?.synced ? t.syncOn : t.syncOff, 'aria-pressed': String(!!view?.synced) },
+    '⇄'
+  )
+  sync.onclick = async () => {
+    if (view) setView(await request<BoardView>('sync.set', { on: !view.synced }))
+  }
+
+  const children: Node[] = [el('div', { class: 'toolbar' }, search, ...(view?.synced ? [] : [addCol]), sync, refresh)]
   const error = flash ?? (view?.error ? t.listFailed(view.error) : null)
   if (error) children.push(el('div', { class: 'error', role: 'status' }, error))
 

@@ -37,6 +37,8 @@ export type BoardState = {
   version: 1
   columns: Column[]
   cards: Record<string, StoredCard>
+  /** The columns are Orca's workspace statuses (the "sync with the Workspace Board" setting). */
+  synced?: boolean
 }
 
 export type CardView = StoredCard & {
@@ -61,6 +63,8 @@ export type BoardView = {
   refreshedAt: number
   /** Why listing terminals failed (raw detail, the panel words it); the board then shows what it last knew. */
   error: string | null
+  /** Columns are Orca's workspace statuses: they cannot be added here, and a move sets the workspace's status. */
+  synced: boolean
 }
 
 /** A loop, schedule or background watcher an agent left running (seen through its tool calls). */
@@ -100,6 +104,8 @@ declare module 'orca' {
       input: { key: string }
       output: { prompt: string | null; message: string | null; at: number | null }
     }
+    /** Turns the Workspace Board sync on or off (the same setting as in Orca's Settings). */
+    'sync.set': { input: { on: boolean }; output: BoardView }
     /** Shows the chat's terminal tab in Orca. */
     'chat.focus': { input: { key: string }; output: { ok: boolean; error: 'closed' | string | null } }
   }

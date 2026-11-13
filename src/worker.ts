@@ -22,16 +22,21 @@ import {
   CHAT_TAB_PREFIX,
   listAgents,
   listTerminals,
+  listWorkspaceStatuses,
   renameChat,
   renameTerminal,
+  setWorkspaceStatus,
   switchTerminal,
   type PsWorktree
 } from './cli.ts'
 import { applyToolCall, monitorView, onRun, type StoredMonitor } from './monitor.ts'
+import { applyWorkspaceStatuses, editSyncedColumns, moveWorkspaceCards } from './sync.ts'
 
 const BOARD_KEY = 'board'
 const STATUS_KEY = 'status'
 const MONITORS_KEY = 'monitors'
+/** While synced, light refreshes re-read the workspace statuses at most this often. */
+const STATUS_POLL_MS = 10_000
 
 type Status = { state: AgentState; at: number; outcome?: string | null; main?: AgentState | null }
 
@@ -45,6 +50,9 @@ export default function activate(orca: OrcaWorkerApi): void {
   let lastChatTabs: ReturnType<typeof chatTabsOf> = []
   /** Tab ids on screen in the focused workspace at the last listing. */
   let visible = new Set<string>()
+  /** Workspace statuses from the last `orca worktree list`, by worktree id (only read while synced). */
+  let workspaceStatus = new Map<string, string>()
+  let workspaceStatusAt = 0
 
   // Every read-modify-write of storage goes through this queue.
   let queue: Promise<unknown> = Promise.resolve()
@@ -87,7 +95,7 @@ export default function activate(orca: OrcaWorkerApi): void {
         active: !c.closed && visible.has(c.key)
       }
     })
-    return { columns: state.columns, cards, refreshedAt, error: lastError }
+    return { columns: state.columns, cards, refreshedAt, error: lastError, synced: state.synced === true }
   }
 
   async function seedStatus(): Promise<void> {
@@ -124,6 +132,29 @@ export default function activate(orca: OrcaWorkerApi): void {
     } catch {
       return true
     }
+  }
+
+  const syncOn = async (): Promise<boolean> => {
+    try {
+      return (await orca.settings.get('syncWorkspaceBoard')) === true
+    } catch {
+      return false
+    }
+  }
+
+  /** Synced: columns and card columns follow the workspaces' statuses. Not synced: the board is its own. */
+  async function applySync(state: BoardState, full: boolean): Promise<BoardState> {
+    if (!(await syncOn())) return state.synced ? { ...state, synced: false } : state
+    if (full || Date.now() - workspaceStatusAt > STATUS_POLL_MS) {
+      try {
+        workspaceStatus = await listWorkspaceStatuses()
+        workspaceStatusAt = Date.now()
+      } catch (err) {
+        orca.log(`worktree list failed: ${(err as Error).message.split('\n')[0]}`)
+      }
+    }
+    // Nothing read yet: leave the board alone rather than rebuild its columns from nothing.
+    return workspaceStatusAt === 0 ? state : applyWorkspaceStatuses(state, workspaceStatus)
   }
 
   const keyOfHandle = (handle: string) => Object.keys(handles).find((k) => handles[k] === handle) ?? null
@@ -179,6 +210,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       visible = await visibleTabs(terminals, layouts)
       state = markUnseen(state, visible, null)
       if (ps) state = await applyPs(state, ps)
+      state = await applySync(state, withAgents)
       lastError = null
       refreshedAt = Date.now()
       await orca.storage.set(BOARD_KEY, state)
@@ -224,8 +256,42 @@ export default function activate(orca: OrcaWorkerApi): void {
     })
   )
 
-  orca.panels.handle('board.move', ({ key, column, index }) => mutate((s) => moveCard(s, key, column, index)))
-  orca.panels.handle('board.columns.set', ({ columns }) => mutate((s) => setColumns(s, columns)))
+  orca.panels.handle('board.move', async ({ key, column, index }) => {
+    const board = await loadBoard()
+    const card = board.cards[key]
+    const synced = board.synced === true && (await syncOn())
+    if (!synced || !card || card.column === column) return mutate((s) => moveCard(s, key, column, index))
+    // Another column is another workspace status: set it in Orca first, the board follows.
+    if (!workspaceStatus.has(card.worktreeId) || !board.columns.some((c) => c.id === column)) return mutate((s) => s)
+    const previous = workspaceStatus.get(card.worktreeId)!
+    try {
+      await setWorkspaceStatus(card.worktreeId, column)
+      workspaceStatus.set(card.worktreeId, column)
+    } catch (err) {
+      orca.log(`workspace status failed: ${(err as Error).message.split('\n').pop()}`)
+      // Orca kept the id it did not know: put the workspace back where it was.
+      if ((err as { code?: unknown }).code === 'unknown_status') await setWorkspaceStatus(card.worktreeId, previous).catch(() => undefined)
+      return mutate((s) => s)
+    }
+    return mutate((s) => moveWorkspaceCards(s, key, column, index))
+  })
+  orca.panels.handle('board.columns.set', async ({ columns }) => {
+    const synced = (await loadBoard()).synced === true && (await syncOn())
+    return mutate((s) => setColumns(s, synced ? editSyncedColumns(s.columns, columns, workspaceStatus.values()) : columns))
+  })
+  /** Re-lists and tells the panels; the sync setting changed, so the columns may be other ones now. */
+  const resync = () =>
+    serial(async () => {
+      const v = await view(await refresh())
+      orca.panels.post('board.changed', v)
+      return v
+    })
+  orca.panels.handle('sync.set', async ({ on }) => {
+    await orca.settings.set('syncWorkspaceBoard', on === true)
+    return resync()
+  })
+  orca.settings.onDidChange(() => void resync())
+
   // The name of an open chat is its Orca tab's title: rename the tab, then re-list.
   orca.panels.handle('card.update', async (patch) => {
     const handle = handles[patch.key]

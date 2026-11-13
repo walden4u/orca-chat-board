@@ -35,7 +35,7 @@ export function emptyBoard(locale = 'en'): BoardState {
 export function normalizeBoard(value: unknown, locale = 'en'): BoardState {
   const v = value as Partial<BoardState> | null
   if (!v || v.version !== 1 || !Array.isArray(v.columns) || v.columns.length === 0) return emptyBoard(locale)
-  return { version: 1, columns: v.columns, cards: v.cards ?? {} }
+  return { version: 1, columns: v.columns, cards: v.cards ?? {}, ...(v.synced === true ? { synced: true } : {}) }
 }
 
 /** Claude and Cursor prefix the tab title with a spinner glyph while working. */
@@ -77,7 +77,7 @@ export function mergeChats(
   chats: LiveTerminal[],
   now: number
 ): { state: BoardState; handles: Record<string, string>; lastOutput: Record<string, number> } {
-  const state: BoardState = { version: 1, columns: prev.columns, cards: { ...prev.cards } }
+  const state: BoardState = { ...prev, cards: { ...prev.cards } }
   const liveKeys = new Set(chats.map((t) => t.tabId))
   const handles: Record<string, string> = {}
   const lastOutput: Record<string, number> = {}
@@ -170,7 +170,7 @@ export function setColumns(prev: BoardState, columns: Column[]): BoardState {
   for (const c of Object.values(prev.cards)) {
     cards[c.key] = ids.has(c.column) ? c : { ...c, column: first, order: order++ }
   }
-  return { version: 1, columns: clean, cards }
+  return { ...prev, columns: clean, cards }
 }
 
 export function updateCard(prev: BoardState, key: string, patch: { label?: string; note?: string }): BoardState {

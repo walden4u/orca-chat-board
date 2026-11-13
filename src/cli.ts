@@ -270,6 +270,24 @@ export async function activateWorktree(worktreeId: string): Promise<void> {
   await runJson(['worktree', 'activate', '--worktree', `id:${worktreeId}`])
 }
 
+/** Every workspace's status on Orca's Workspace Board (`orca worktree list`), by worktree id. */
+export async function listWorkspaceStatuses(): Promise<Map<string, string>> {
+  const result = (await runJson(['worktree', 'list'])) as { worktrees?: { id?: string; workspaceStatus?: string | null }[] }
+  const out = new Map<string, string>()
+  for (const w of result.worktrees ?? []) if (w.id && w.workspaceStatus) out.set(w.id, w.workspaceStatus)
+  return out
+}
+
+/** Moves a workspace to another column of Orca's Workspace Board. */
+export async function setWorkspaceStatus(worktreeId: string, status: string): Promise<void> {
+  const result = (await runJson(['worktree', 'set', '--worktree', `id:${worktreeId}`, '--workspace-status', status])) as {
+    warnings?: { code?: string; message?: string }[]
+  }
+  // Orca saves a status id it does not know and only warns: to the board that is a failure.
+  const unknown = result?.warnings?.find((w) => w.code === 'UNKNOWN_WORKSPACE_STATUS')
+  if (unknown) throw Object.assign(new Error(unknown.message ?? `Unknown workspace status ${status}`), { code: 'unknown_status' })
+}
+
 export async function switchTerminal(handle: string): Promise<void> {
   await runJson(['terminal', 'switch', '--terminal', handle])
 }

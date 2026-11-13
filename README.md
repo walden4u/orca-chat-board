@@ -45,6 +45,7 @@ Under **Settings → Plugins → Chat Board**:
 | Setting | Default |
 |---|---|
 | Move to In progress when you start a chat | on |
+| Sync with the Workspace Board | off |
 | Show agent logo | on |
 | Show workspace | on |
 | Show agent status icon | on |
@@ -53,13 +54,23 @@ Under **Settings → Plugins → Chat Board**:
 | Show a preview on hover | on |
 | Language (Auto, English, Español) | Auto |
 
+### Sync with the Workspace Board
+
+Turn it on in Settings or with the ⇄ button in the panel. The board then follows Orca's Workspace Board in both directions:
+
+- The columns are Orca's workspace statuses (Todo, In progress, In review, Done and your custom ones).
+- Dragging a chat to another column sets its workspace's status in Orca. The other chats of that workspace move with it, because a workspace has one status.
+- Moving a workspace on Orca's board moves its chats here. Orca does not announce the change, so the panel picks it up within about 10 seconds, or at once with ⟳.
+- You can reorder, rename and collapse columns here. Statuses are added and removed in Orca. Orca does not tell plugins the name of a custom status, so it first shows up under its id (`status-5`); rename the column once.
+- "Move to In progress when you start a chat" does not apply while synced.
+
 ## Permissions
 
 Orca asks you to approve these when you install the plugin. Here is what each one is used for:
 
 | Permission | What the plugin does with it |
 |---|---|
-| **Runs its own code** (Node worker) | Lists your chats in every workspace, opens a chat and renames its tab. The worker only ever runs these Orca CLI commands: `orca terminal list`, `orca terminal switch`, `orca terminal rename`, `orca worktree ps` (agents and status, chat tabs included), `orca chat rename` and `orca worktree activate`. The plugin API alone sees only the focused workspace and cannot open or rename tabs. |
+| **Runs its own code** (Node worker) | Lists your chats in every workspace, opens a chat and renames its tab. The worker only ever runs these Orca CLI commands: `orca terminal list`, `orca terminal switch`, `orca terminal rename`, `orca worktree ps` (agents and status, chat tabs included), `orca chat rename` and `orca worktree activate`; with the Workspace Board sync on, also `orca worktree list` and `orca worktree set --workspace-status`. The plugin API alone sees only the focused workspace and cannot open or rename tabs. |
 | `storage:own` | Saves the board: columns, card positions, notes, agent status and monitors. All of it stays in the plugin's own folder. |
 | `agent:read` | Agent status icons, the yellow "not seen yet" mark, and moving a Backlog card when you start a chat. |
 | `workspace:read` | Knows which tab you are looking at, for the "not seen yet" mark and the open-chat highlight, and refreshes the board when chats open or close. |

@@ -61,6 +61,13 @@
         "default": true
       },
       {
+        "key": "syncWorkspaceBoard",
+        "title": "Sync with the Workspace Board",
+        "description": "Columns become Orca's workspace statuses. Moving a chat sets its workspace's status, and moving a workspace on Orca's board moves its chats. Every chat of a workspace shares one column, and the auto-move to In progress no longer applies.",
+        "type": "boolean",
+        "default": false
+      },
+      {
         "key": "showAgent",
         "title": "Show agent logo",
         "description": "Claude / Cursor logo (or agent name) on each card.",

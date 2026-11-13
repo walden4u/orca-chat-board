@@ -28,6 +28,7 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
   color: var(--orca-muted-foreground);
 }
 .ghost:hover { background: var(--orca-accent); color: var(--orca-accent-foreground); }
+.ghost.on { color: var(--orca-foreground); border-color: currentColor; }
 .error {
   margin: 6px 8px 0; padding: 6px 8px; border-radius: 4px; flex: none;
   background: color-mix(in srgb, var(--orca-destructive) 15%, transparent);
