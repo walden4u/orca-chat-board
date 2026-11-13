@@ -18,6 +18,8 @@
 - **Tab takes the agent's suggestion:** the reply box shows the next prompt the agent suggests, and Tab fills it in.
 - **Open an archived chat again:** ↻ on an archived Claude card starts Claude in its workspace with the list of conversations to resume, and the card moves to the new tab.
 - **Archive button:** the archive is put away by default, and a toolbar button with the number of archived chats opens and closes it.
+- **The chat beside its reply box** (a setting, off by default): Orca switches to the chat's tab when its reply box opens.
+- **Archive, README:** the README is reorganised around what you want to do.
 - **Korean UI:** the panel is in Korean when Orca is, or when you pick 한국어 under Language.
 - **Filter:** text typed through an IME (Korean, Japanese, Chinese) arrived as loose letters, because the filter box was replaced on every keystroke.
 - **Bigger hover preview:** as wide as the panel and as tall as the room above or below the card, with the reply shown from its start.

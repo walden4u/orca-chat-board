@@ -35,6 +35,11 @@ export type ReplyHandlers = {
   onNext: () => void
   /** Closed by hand (✕, Escape, a click outside). */
   onClosed: () => void
+  /**
+   * You are at this box: at once for one you opened, at your first click for one that opened by
+   * itself. Orca may move the keyboard while it answers; the field takes it back afterwards.
+   */
+  onEngaged: () => Promise<void>
 }
 
 const PICTURE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
@@ -322,6 +327,16 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
 
   document.body.append(backdrop)
   if (!readOnly && !target.auto) setTimeout(() => input.focus(), 0)
+  let engaged = false
+  const engage = () => {
+    if (engaged) return
+    engaged = true
+    void handlers.onEngaged().then(() => {
+      if (open && !readOnly && !busy && document.activeElement !== input) input.focus()
+    })
+  }
+  if (target.auto) dialog.addEventListener('pointerdown', engage, true)
+  else engage()
 
   void loadPreview(target.key, true).then(
     (data) => {

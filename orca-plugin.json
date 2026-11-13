@@ -55,71 +55,78 @@
     "settings": [
       {
         "key": "autoMoveToInProgress",
-        "title": "Move to In progress when you start a chat",
-        "description": "When you talk to a chat in the Backlog column, its card moves to In progress. Uses the default Backlog and In progress columns (renaming them is fine); nothing happens if either was deleted.",
+        "title": "대화를 시작하면 In progress로 이동",
+        "description": "'워크스페이스 보드와 동기화'가 켜져 있으면 이 설정은 동작하지 않습니다. 동기화를 껐을 때만 쓰입니다: Backlog 컬럼에 있는 대화에 말을 걸면 카드가 In progress로 옮겨집니다. 둘 중 하나를 지웠으면 아무 일도 일어나지 않습니다.",
         "type": "boolean",
         "default": true
       },
       {
         "key": "syncWorkspaceBoard",
-        "title": "Sync with the Workspace Board",
-        "description": "Columns become Orca's workspace statuses. Moving a chat sets its workspace's status, and moving a workspace on Orca's board moves its chats. Every chat of a workspace shares one column, and the auto-move to In progress no longer applies.",
+        "title": "워크스페이스 보드와 동기화",
+        "description": "컬럼이 Orca의 워크스페이스 상태가 됩니다. 컬럼 이름·추가·삭제는 Orca에서 하고(워크스페이스 보드 → Board settings → Statuses), 여기서는 순서와 접기만 바꿉니다. 대화를 옮기면 그 워크스페이스의 상태가 바뀌고, Orca 보드에서 워크스페이스를 옮기면 그 대화들이 따라옵니다. 한 워크스페이스의 대화는 모두 같은 컬럼에 있고, 위의 'In progress로 이동'은 동작하지 않습니다.",
         "type": "boolean",
         "default": false
       },
       {
         "key": "autoCheck",
-        "title": "Check Orca automatically",
-        "description": "While the panel is on screen, asks Orca which chat is open, and with the Workspace Board sync on what changed on Orca's board: every 3 seconds while an agent works or you use the panel, every 15 seconds otherwise. Each check starts the orca CLI once. Turned off, the board updates when you click ⟳, when you open the panel and when a chat opens or closes; agent status icons stay live.",
+        "title": "Orca 자동 확인",
+        "description": "패널이 화면에 보이는 동안 어느 대화가 열려 있는지, 그리고 동기화가 켜져 있으면 Orca 보드에서 무엇이 바뀌었는지 Orca에 물어봅니다. 에이전트가 작업 중이거나 패널을 쓰는 동안은 3초마다, 그 밖에는 15초마다 확인합니다. 확인할 때마다 orca CLI를 한 번 실행합니다. 끄면 ⟳를 누를 때, 패널을 열 때, 대화가 열리거나 닫힐 때만 갱신됩니다. 에이전트 상태 아이콘은 끈 상태에서도 실시간입니다.",
         "type": "boolean",
         "default": true
       },
       {
+        "key": "followChat",
+        "title": "답장 창과 함께 Orca 대화창 보기",
+        "description": "답장 창이 열리면 Orca도 그 대화의 탭으로 바뀌어, 창 옆에서 전체 대화를 볼 수 있습니다. 저절로 뜬 창은 그 창을 클릭한 뒤에만 바뀝니다. 입력 중이던 탭을 빼앗지 않기 위해서입니다.",
+        "type": "boolean",
+        "default": false
+      },
+      {
         "key": "showAgent",
-        "title": "Show agent logo",
-        "description": "Claude / Cursor logo (or agent name) on each card.",
+        "title": "에이전트 로고 표시",
+        "description": "카드마다 Claude, Cursor 등의 로고(또는 에이전트 이름)를 보여 줍니다.",
         "type": "boolean",
         "default": true
       },
       {
         "key": "showWorkspace",
-        "title": "Show workspace",
-        "description": "Workspace name chip on each card.",
+        "title": "워크스페이스 표시",
+        "description": "카드마다 워크스페이스 이름을 보여 줍니다.",
         "type": "boolean",
         "default": true
       },
       {
         "key": "showStatus",
-        "title": "Show agent status icon",
-        "description": "Working, waiting for you, done, interrupted, needs permission.",
+        "title": "에이전트 상태 아이콘 표시",
+        "description": "작업 중, 답변 대기, 완료, 중단됨, 권한 필요.",
         "type": "boolean",
         "default": true
       },
       {
         "key": "showTime",
-        "title": "Show time since last change",
-        "description": "How long ago the agent changed status or the chat last printed output.",
+        "title": "마지막 변화 뒤 지난 시간 표시",
+        "description": "에이전트의 상태가 바뀌거나 대화에 마지막 출력이 나온 뒤 지난 시간입니다.",
         "type": "boolean",
         "default": true
       },
       {
         "key": "showNotes",
-        "title": "Show notes",
-        "description": "The note you wrote on a card, under its title.",
+        "title": "메모 표시",
+        "description": "카드에 적은 메모를 제목 아래에 보여 줍니다.",
         "type": "boolean",
         "default": true
       },
       {
         "key": "showPreview",
-        "title": "Show a preview on hover",
-        "description": "Hovering a card shows your last message and the agent's last reply, read from Orca at that moment.",
+        "title": "마우스를 올리면 미리 보기",
+        "description": "카드에 마우스를 올리면 내 마지막 메시지와 에이전트의 마지막 답변을 보여 줍니다. 그 순간 Orca에서 읽어 옵니다.",
         "type": "boolean",
         "default": true
       },
       {
         "key": "language",
-        "title": "Language",
-        "description": "Auto follows Orca's language (Spanish for es-*, Korean for ko-*, English otherwise).",
+        "title": "언어",
+        "description": "Auto는 Orca의 언어를 따릅니다(es-*는 스페인어, ko-*는 한국어, 그 밖에는 영어).",
         "type": "string",
         "default": "auto",
         "enum": [

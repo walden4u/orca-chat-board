@@ -76,6 +76,8 @@ let toolbarEl: HTMLElement | null = null
 const show = { agent: true, workspace: true, status: true, time: true, notes: true, preview: true }
 /** The "Check Orca automatically" setting: off means the board asks Orca only on ⟳, on opening and on Orca's events. */
 let autoCheck = true
+/** The "Show the chat in Orca with its reply box" setting. */
+let followChat = false
 /** An automatic check is on its way to the worker and back. */
 let checking = false
 /** The automatic check's two paces, and how long it stays at the fast one after you last used the panel. */
@@ -103,6 +105,7 @@ async function loadSettings(): Promise<void> {
     show.notes = s.showNotes !== false
     show.preview = s.showPreview !== false
     autoCheck = s.autoCheck !== false
+    followChat = s.followChat === true
     setLanguage(s.language)
   } catch {
     // Settings unavailable (older approval): keep everything visible.
@@ -295,6 +298,15 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' = 'click'): void 
       waiting: waitingCards(c.key).length
     },
     {
+      // You are at this box: with the setting on, Orca shows that chat's tab beside it.
+      onEngaged: async () => {
+        if (!followChat || c.closed) return
+        const r = await orca.plugin.request('chat.focus', { key: c.key }).catch(() => null)
+        if (r?.ok && view && r.error !== 'chat-workspace') {
+          for (const x of view.cards) x.active = x.key === c.key
+          render()
+        }
+      },
       onSent: (title) => {
         trace(`reply left ${id}: sent`)
         showFlash(t.sent(title), true)
