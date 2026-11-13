@@ -52,6 +52,9 @@ let dragKey: string | null = null
 let dragEndedAt = 0
 let flash: string | null = null
 let pendingRender = false
+/** The filter box and its toolbar, made once and kept in the page (see render). */
+let searchEl: HTMLInputElement | null = null
+let toolbarEl: HTMLElement | null = null
 
 /** What each card shows; mirrors the plugin's settings (Settings → Plugins → Chat Board). */
 const show = { agent: true, workspace: true, status: true, time: true, notes: true, preview: true }
@@ -537,10 +540,13 @@ function render(force = false): void {
   }
   pendingRender = false
   const root = document.getElementById('app')!
-  const searchHadFocus = document.activeElement?.classList.contains('search')
 
-  const search = el('input', { class: 'search', type: 'search', placeholder: t.filter, 'aria-label': t.filterLabel })
-  search.value = filter
+  // The filter box survives every redraw. A new input in its place would end the IME composition
+  // in progress, and Korean, Japanese or Chinese text then arrives as loose letters.
+  const search = (searchEl ??= el('input', { class: 'search', type: 'search' }))
+  search.placeholder = t.filter
+  search.setAttribute('aria-label', t.filterLabel)
+  if (search.value !== filter) search.value = filter
   search.oninput = () => {
     filter = search.value
     render(true)
@@ -564,7 +570,10 @@ function render(force = false): void {
     if (view) setView(await request<BoardView>('sync.set', { on: !view.synced }))
   }
 
-  const children: Node[] = [el('div', { class: 'toolbar' }, search, ...(view?.synced ? [] : [addCol]), sync, refresh)]
+  const toolbar = (toolbarEl ??= el('div', { class: 'toolbar' }, search))
+  while (toolbar.lastChild && toolbar.lastChild !== search) toolbar.lastChild.remove()
+  toolbar.append(...(view?.synced ? [] : [addCol]), sync, refresh)
+  const children: Node[] = []
   const error = flash ?? (view?.error ? t.listFailed(view.error) : null)
   if (error) children.push(el('div', { class: 'error', role: 'status' }, error))
 
@@ -614,11 +623,10 @@ function render(force = false): void {
     }
   }
 
-  root.replaceChildren(...children)
-  if (searchHadFocus) {
-    search.focus()
-    search.setSelectionRange(search.value.length, search.value.length)
-  }
+  // Everything under the toolbar is rebuilt; the toolbar itself stays where it is.
+  if (toolbar.parentNode !== root) root.replaceChildren(toolbar)
+  while (root.lastChild && root.lastChild !== toolbar) root.lastChild.remove()
+  root.append(...children)
 }
 
 // ---------- boot ----------
