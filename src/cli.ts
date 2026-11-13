@@ -298,6 +298,20 @@ export async function sendToTerminal(handle: string, text: string): Promise<void
 }
 
 /**
+ * Starts an agent in a workspace the way a new agent tab does, in a terminal, and shows it. Orca
+ * sets such a session up to report its status, which a bare `claude` typed into a shell would not.
+ * Answers the new terminal's handle.
+ */
+export async function launchAgent(worktreeId: string, agent: string): Promise<string> {
+  const result = (await runJson(['agent', 'launch', '--agent', agent, '--worktree', `id:${worktreeId}`, '--surface', 'terminal', '--focus'])) as {
+    outcome?: { kind?: string; handle?: string }
+  } | null
+  const handle = result?.outcome?.handle
+  if (!handle || result?.outcome?.kind !== 'terminal') throw new Error('Orca did not open a terminal for the agent')
+  return handle
+}
+
+/**
  * Pastes `text` into a terminal's input without submitting it (a bracketed paste, written as is).
  * Claude Code turns a pasted path of an image file into an attached image.
  */

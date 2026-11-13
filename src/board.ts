@@ -142,6 +142,19 @@ export function mergeChats(
   return { state, handles, lastOutput }
 }
 
+/**
+ * Hands an archived card to the tab that reopens its chat: under the new tab's key it keeps its
+ * column, note and check. A card the new tab already got on its own gives way.
+ */
+export function adoptCard(prev: BoardState, archivedKey: string, tabKey: string): BoardState {
+  const card = prev.cards[archivedKey]
+  if (!card || !card.closed || archivedKey === tabKey) return prev
+  const cards = { ...prev.cards }
+  delete cards[archivedKey]
+  cards[tabKey] = { ...card, key: tabKey, closed: false, closedAt: null, unseenAt: null }
+  return { ...prev, cards }
+}
+
 /** Puts `key` at `index` among the open cards of `column` and renumbers that column. */
 export function moveCard(prev: BoardState, key: string, column: string, index: number): BoardState {
   const card = prev.cards[key]

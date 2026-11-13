@@ -4,6 +4,7 @@ import type { OrcaWorkerApi } from 'orca/worker'
 import type { AgentState, BoardState, BoardView, CardView, Column } from './protocol.ts'
 import {
   activeTabsByWorktree,
+  adoptCard,
   chatsOf,
   chatTabsOf,
   tabTitlesOf,
@@ -20,6 +21,7 @@ import {
 } from './board.ts'
 import {
   activateWorktree,
+  launchAgent,
   CHAT_TAB_PREFIX,
   listAgents,
   listTerminals,
@@ -50,6 +52,9 @@ const STATUS_POLL_MS = 10_000
 const MAX_PROMPT_CHARS = 8000
 const MAX_IMAGES = 5
 const ATTACH_SETTLE_MS = 600
+/** How long a reopened Claude gets to show its prompt before /resume is typed anyway. */
+const REOPEN_WAIT_MS = 12_000
+const REOPEN_POLL_MS = 1500
 /** Terminal output this much newer than Orca's record of the chat: the record is behind. */
 const STALE_RECORD_MS = 120_000
 const MAX_SCREEN_CHARS = 20_000
@@ -518,6 +523,37 @@ export default function activate(orca: OrcaWorkerApi): void {
     } catch (err) {
       const reason = (err as Error).message.split('\n').pop() ?? ''
       orca.log(`send failed: ${reason}`)
+      return { ok: false, error: reason }
+    }
+  })
+
+  // An archived Claude chat, opened again: a new Claude tab in its workspace (started by Orca, so
+  // its status is tracked) showing Claude's own list of conversations to resume. You pick there;
+  // nothing is chosen for you. The archived card moves to the new tab with its note and check.
+  orca.panels.handle('chat.reopen', async ({ key }) => {
+    const card = (await loadBoard()).cards[key]
+    if (!card || !card.closed) return { ok: false, error: 'open' }
+    if (card.sessionId || card.agent !== 'claude') return { ok: false, error: 'unsupported' }
+    try {
+      const handle = await launchAgent(card.worktreeId, 'claude')
+      const { terminals } = await listTerminals()
+      const tab = terminals.find((t) => t.handle === handle)?.tabId
+      if (tab) await mutate((s) => adoptCard(s, key, tab))
+      // The rest takes Claude's start-up time, longer than a panel waits for an answer: it goes on
+      // after this one. Claude's prompt on the screen says it is ready for a command.
+      void (async () => {
+        for (let waited = 0; waited < REOPEN_WAIT_MS; waited += REOPEN_POLL_MS) {
+          await new Promise((done) => setTimeout(done, REOPEN_POLL_MS))
+          const rows = await readTerminalScreen(handle).catch(() => [])
+          if (rows.some((row) => /^[❯›>]/.test(row))) break
+        }
+        await sendToTerminal(handle, '/resume')
+        await resync()
+      })().catch((err) => orca.log(`reopen failed: ${(err as Error).message.split('\n').pop()}`))
+      return { ok: true, error: null }
+    } catch (err) {
+      const reason = (err as Error).message.split('\n').pop() ?? ''
+      orca.log(`reopen failed: ${reason}`)
       return { ok: false, error: reason }
     }
   })

@@ -129,6 +129,11 @@ declare module 'orca' {
       input: { key: string; text: string; images?: string[] }
       output: { ok: boolean; error: 'closed' | 'chat-tab' | 'empty' | 'image-lost' | string | null }
     }
+    /**
+     * Opens an archived Claude chat again: a new Claude tab in its workspace with Claude's list of
+     * conversations to resume. `unsupported`: not a Claude terminal chat.
+     */
+    'chat.reopen': { input: { key: string }; output: { ok: boolean; error: 'open' | 'unsupported' | string | null } }
     /** One piece (base64, in order) of a picture attached in the reply box; kept in memory until Send. */
     'attach.put': { input: { id: string; type: string; data: string }; output: { result: 'ok' | 'type' | 'size' | 'count' } }
     /** Forgets a picture that was attached and not sent. */

@@ -594,6 +594,43 @@ test('pictures attached in the reply box are pasted as file paths before the tex
   await worker.deactivate()
 })
 
+test('an archived Claude chat opens again in a tab Orca starts, and its card moves there', async () => {
+  const calls: string[][] = []
+  let live = [term(1)]
+  setOrcaRunner(async (args) => {
+    calls.push(args)
+    if (args[0] === 'terminal' && args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: live, visualLayouts: [] } })
+    if (args[0] === 'agent' && args[1] === 'launch') {
+      live = [term(9, { title: 'Claude Code' })]
+      return JSON.stringify({ ok: true, result: { outcome: { kind: 'terminal', handle: 'term_9' } } })
+    }
+    if (args[1] === 'read') return JSON.stringify({ ok: true, result: { terminal: { tail: ['Claude Code', '❯ Try "fix it"'] } } })
+    if (args[1] === 'send') return JSON.stringify({ ok: true, result: { send: { accepted: true } } })
+    if (args[1] === 'ps') return JSON.stringify({ ok: true, result: { worktrees: [] } })
+    throw new Error(`unexpected ${args.join(' ')}`)
+  })
+  const worker = await mountWorker(main, { host: host() })
+  await worker.request('board.get', { refresh: true })
+  await worker.request('card.update', { key: 'tab1', note: 'keep me', watch: true })
+  // Open chats are not reopened.
+  assert.deepEqual(await worker.request('chat.reopen', { key: 'tab1' }), { ok: false, error: 'open' })
+
+  live = []
+  await worker.request('board.get', { refresh: true }) // the chat is gone: its card is archived
+  assert.deepEqual(await worker.request('chat.reopen', { key: 'tab1' }), { ok: true, error: null })
+  assert.deepEqual(
+    calls.find((c) => c[0] === 'agent'),
+    ['agent', 'launch', '--agent', 'claude', '--worktree', `id:${WT}`, '--surface', 'terminal', '--focus', '--json']
+  )
+  // Claude needs a moment to start: the command for its list follows once its prompt shows.
+  assert.equal(calls.some((c) => c[1] === 'send'), false)
+  await new Promise((done) => setTimeout(done, 2000))
+  assert.deepEqual(calls.find((c) => c[1] === 'send'), ['terminal', 'send', '--terminal', 'term_9', '--text=/resume', '--enter', '--json'])
+  const cards = ((await worker.request('board.get', {})) as BoardView).cards
+  assert.deepEqual(cards.map((c) => [c.key, c.closed, c.note, c.watch, c.handle]), [['tab9', false, 'keep me', true, 'term_9']])
+  await worker.deactivate()
+})
+
 test('a turn whose end shows up in a listing before its event is still news', async () => {
   // Two chats finish close together: the first one's event lists the agents, and that listing
   // already says the second one is done. Its own event then brings nothing new.

@@ -51,6 +51,20 @@ let confirmClearArchive = false
 let dragKey: string | null = null
 /** When the last drag ended; a click right after a drop is not an "open". */
 let dragEndedAt = 0
+/** The archive under the board is showing; kept across reloads of the panel where the browser lets it. */
+let archiveOpen = false
+try {
+  archiveOpen = localStorage.getItem('chat-board.archive') === 'open'
+} catch {
+  // No storage in this frame: it starts put away.
+}
+function rememberArchiveOpen(): void {
+  try {
+    localStorage.setItem('chat-board.archive', archiveOpen ? 'open' : 'closed')
+  } catch {
+    // Remembered until the panel reloads, then.
+  }
+}
 let flash: string | null = null
 let flashGood = false
 let pendingRender = false
@@ -407,6 +421,18 @@ function renderCard(c: CardView): HTMLElement {
     render(true)
   }
   actions.append(edit)
+  if (c.closed && c.agent === 'claude' && !c.sessionId) {
+    // Always in sight, not among the hover buttons: it is what an archived chat is there for.
+    const again = el('button', { class: 'ghost reopen', title: t.reopen }, `↻ ${t.reopenShort}`)
+    again.onclick = async (e) => {
+      e.stopPropagation()
+      again.setAttribute('disabled', '')
+      const r = await request<{ ok: boolean; error: string | null }>('chat.reopen', { key: c.key })
+      if (r?.ok) showFlash(t.reopened, true)
+      else if (r) showFlash(t.reopenFailed(r.error ?? ''))
+    }
+    card.querySelector('.card-meta')?.append(again)
+  }
   if (c.closed) {
     const del = el('button', { class: 'ghost danger', title: t.deleteCard }, '✕')
     del.onclick = async (e) => {
@@ -711,7 +737,20 @@ function render(force = false): void {
 
   const toolbar = (toolbarEl ??= el('div', { class: 'toolbar' }, search))
   while (toolbar.lastChild && toolbar.lastChild !== search) toolbar.lastChild.remove()
-  toolbar.append(...(view?.synced ? [] : [addCol]), sync, refresh)
+  // The archive is put away until you ask for it: this button shows how many chats it holds and
+  // opens it under the board (and puts it away again).
+  const archivedCount = (view?.cards ?? []).filter((c) => c.closed).length
+  const archive = el(
+    'button',
+    { class: `ghost${archiveOpen ? ' on' : ''}`, title: archiveOpen ? t.archiveHide : t.archiveShow, 'aria-pressed': String(archiveOpen) },
+    t.archiveButton(archivedCount)
+  )
+  archive.onclick = () => {
+    archiveOpen = !archiveOpen
+    rememberArchiveOpen()
+    render(true)
+  }
+  toolbar.append(...(view?.synced ? [] : [addCol]), ...(archivedCount ? [archive] : []), sync, refresh)
   const children: Node[] = []
   const error = flash ?? (view?.error ? t.listFailed(view.error) : null)
   if (error) children.push(el('div', { class: flash && flashGood ? 'error notice' : 'error', role: 'status' }, error))
@@ -730,8 +769,7 @@ function render(force = false): void {
     const closed = view.cards
       .filter((c) => c.closed && matches(c))
       .sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0))
-    if (closed.length) {
-      const wasOpen = (document.querySelector('details.archive') as HTMLDetailsElement | null)?.open ?? false
+    if (closed.length && (archiveOpen || closed.some((c) => c.key === editingCard))) {
       const list = el('div', { class: 'list' })
       for (const c of closed) list.append(renderCard(c))
       const clear = el(
@@ -755,9 +793,17 @@ function render(force = false): void {
           }, 3000)
         }
       }
-      const summary = el('summary', {}, el('span', { class: 'archive-title' }, t.archived(closed.length)), clear)
+      const summary = el('summary', { title: t.archiveHide }, el('span', { class: 'archive-title' }, t.archived(closed.length)), clear)
+      // Its title line puts it away, like the toolbar button.
+      summary.onclick = (e) => {
+        e.preventDefault()
+        if ((e.target as Element).closest('button')) return
+        archiveOpen = false
+        rememberArchiveOpen()
+        render(true)
+      }
       const details = el('details', { class: 'archive' }, summary, list)
-      details.open = wasOpen || closed.some((c) => c.key === editingCard)
+      details.open = true
       children.push(details)
     }
   }

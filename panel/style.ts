@@ -240,12 +240,15 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .reply-row .primary:disabled { opacity: .5; cursor: default; }
 
 details.archive { border-top: 1px solid var(--orca-border); padding: 6px 8px; flex: none; max-height: 40%; overflow: auto; }
+.toolbar .ghost { white-space: nowrap; }
 details.archive summary { cursor: pointer; color: var(--orca-muted-foreground); display: flex; align-items: center; gap: 6px; }
 details.archive summary { list-style: none; }
 details.archive summary::-webkit-details-marker { display: none; }
 details.archive summary::before { content: '▸'; }
 details.archive[open] summary::before { content: '▾'; }
 details.archive .archive-title { flex: 1; }
+.reopen { margin-left: auto; border-color: var(--orca-border); color: var(--orca-foreground); white-space: nowrap; }
+.card.closed .card-meta { flex-wrap: wrap; }
 details.archive .list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .danger { color: var(--orca-destructive); }
 `
