@@ -284,6 +284,36 @@ test('a checked chat keeps its check, and reading it in the reply box clears its
   await worker.deactivate()
 })
 
+test('a checked chat that finishes on screen still waits for you; an unchecked one does not', async () => {
+  fakeCli(
+    () => [term(1), term(2)],
+    [],
+    () => [
+      { worktreeId: WT, worktreePath: '/Users/me/toolbox', root: { type: 'split', children: [{ type: 'group', activeTabId: 'tab1', tabs: [] }, { type: 'group', activeTabId: 'tab2', tabs: [] }] } }
+    ]
+  )
+  const worker = await mountWorker(main, { host: host({}, () => ['term_1', 'term_2']) })
+  await worker.request('board.get', { refresh: true })
+  await worker.request('card.update', { key: 'tab1', watch: true })
+  const status = (terminalId: string, state: 'working' | 'done', receivedAt: number) =>
+    worker.emit('agent.status.changed', { workspaceId: null, paneKey: terminalId, terminalId, state, receivedAt })
+  const unseen = async (input: object) =>
+    ((await worker.request('board.get', input)) as BoardView).cards.filter((c) => c.unseenAt).map((c) => c.key)
+
+  // Both tabs are on screen when their agents finish.
+  for (const id of ['term_1', 'term_2']) {
+    await status(id, 'working', 10)
+    await status(id, 'done', 20)
+  }
+  assert.deepEqual(await unseen({}), ['tab1'])
+  // Later listings do not take the mark away either; reading it in the reply box does.
+  await worker.request('seen.check', {})
+  assert.deepEqual(await unseen({ refresh: true }), ['tab1'])
+  await worker.request('card.seen', { key: 'tab1' })
+  assert.deepEqual(await unseen({ refresh: true }), [])
+  await worker.deactivate()
+})
+
 test('active tabs are read from every split group of a workspace', () => {
   const tabs = activeTabsByWorktree([
     {

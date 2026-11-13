@@ -226,7 +226,9 @@ export default function activate(orca: OrcaWorkerApi): void {
       handles = merged.handles
       lastOutput = merged.lastOutput
       visible = await visibleTabs(terminals, layouts)
-      state = markUnseen(state, visible, null)
+      // A chat on screen counts as seen. Not a checked one: its reply box is where you read it,
+      // and the tab on screen may just be the one you left open while working from the board.
+      state = markUnseen(state, [...visible].filter((k) => !state.cards[k]?.watch), null)
       if (ps) state = await applyPs(state, ps)
       state = await applySync(state, withAgents)
       lastError = null
@@ -484,7 +486,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       let next =
         state === 'working'
           ? markUnseen(board, [key], null)
-          : visible.has(key)
+          : visible.has(key) && !board.cards[key]?.watch
             ? board
             : markUnseen(board, [key], receivedAt)
       // You started talking to a Backlog chat (not a loop waking up by itself): it is in progress now.
