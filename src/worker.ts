@@ -26,6 +26,7 @@ import {
   listWorkspaceStatuses,
   pasteIntoTerminal,
   pressEnter,
+  readTerminal,
   readTerminalScreen,
   renameChat,
   renameTerminal,
@@ -37,7 +38,7 @@ import {
 import { applyToolCall, monitorView, onRun, type StoredMonitor } from './monitor.ts'
 import { dropAttachment, putAttachment, saveAttachment } from './attach.ts'
 import { readWorkspaceStatusNames } from './profile.ts'
-import { looksBusy } from './screen.ts'
+import { looksBusy, suggestionOf } from './screen.ts'
 import { applyWorkspaceStatuses, editSyncedColumns, moveWorkspaceCards } from './sync.ts'
 
 const BOARD_KEY = 'board'
@@ -441,10 +442,23 @@ export default function activate(orca: OrcaWorkerApi): void {
 
   // Hover preview: asked on demand, answered from Orca's agent record, kept nowhere.
   orca.panels.handle('chat.preview', async ({ key, screen }) => {
-    const found = { prompt: null as string | null, message: null as string | null, at: null as number | null, screen: null as string | null }
+    const found = {
+      prompt: null as string | null,
+      message: null as string | null,
+      at: null as number | null,
+      screen: null as string | null,
+      suggestion: null as string | null
+    }
     try {
-      // The reply box also asks for the terminals: their last output tells whether Orca's record is behind.
-      const [agents, live] = await Promise.all([listAgents(), screen ? listTerminals().catch(() => null) : null])
+      // The reply box also asks for the terminals (their last output tells whether Orca's record is
+      // behind) and for this chat's screen: what the agent suggests as your next prompt is on it.
+      const handle = screen ? handles[key] : undefined
+      const [agents, live, shown] = await Promise.all([
+        listAgents(),
+        screen ? listTerminals().catch(() => null) : null,
+        handle ? readTerminal(handle).catch(() => null) : null
+      ])
+      if (shown) found.suggestion = suggestionOf(shown.rows, shown.draft)
       for (const w of agents) {
         for (const a of w.agents ?? []) {
           if (a.parentPaneKey || a.paneKey.split(':')[0] !== key) continue
@@ -456,8 +470,8 @@ export default function activate(orca: OrcaWorkerApi): void {
       // Some sessions stop reporting to Orca (started before it restarted, say) and their record
       // stays at an old exchange while the terminal goes on. Then the screen itself is the news.
       const term = live?.terminals.find((t) => t.handle === handles[key])
-      if (term && (term.lastOutputAt ?? 0) - (found.at ?? 0) > STALE_RECORD_MS) {
-        const rows = await readTerminalScreen(term.handle)
+      if (term && shown && (term.lastOutputAt ?? 0) - (found.at ?? 0) > STALE_RECORD_MS) {
+        const rows = [...shown.rows]
         while (rows.length && !rows[rows.length - 1]!.trim()) rows.pop()
         found.screen = rows.map((r) => r.trimEnd()).join('\n').slice(-MAX_SCREEN_CHARS) || null
       }

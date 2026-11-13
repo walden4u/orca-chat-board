@@ -2,7 +2,7 @@
 // agent's last reply and shows them in a popover. Nothing is cached beyond a few seconds.
 import { t } from './i18n.ts'
 
-type Preview = { prompt: string | null; message: string | null; at: number | null; screen: string | null }
+type Preview = { prompt: string | null; message: string | null; at: number | null; screen: string | null; suggestion: string | null }
 
 const DELAY_MS = 400
 /** Right after a popover was open, the next card's shows almost at once (like system tooltips). */

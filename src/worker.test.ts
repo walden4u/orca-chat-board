@@ -4,7 +4,7 @@ import * as main from './worker.ts'
 import { setOrcaRunner } from './cli.ts'
 import { activeTabsByWorktree, cleanTitle, defaultColumns, emptyBoard, mergeChats, moveCard, setColumns, type LiveTerminal } from './board.ts'
 import type { BoardView } from './protocol.ts'
-import { looksBusy } from './screen.ts'
+import { looksBusy, suggestionOf } from './screen.ts'
 import { readFileSync, unlinkSync } from 'node:fs'
 
 const WT = 'repo::/Users/me/toolbox::workspace:1'
@@ -506,11 +506,12 @@ test('Orca chat tabs (no terminal) get cards from `orca worktree ps`', async () 
 test('hover preview answers the last prompt and reply from Orca, on demand', async () => {
   let lastOutputAt = 1001
   const reads: string[][] = []
+  let draft: string | undefined
   setOrcaRunner(async (args) => {
     if (args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: [term(1, { lastOutputAt })], visualLayouts: [] } })
     if (args[1] === 'read') {
       reads.push(args)
-      return JSON.stringify({ ok: true, result: { terminal: { tail: ['> new question  ', 'New answer.', '', ''] } } })
+      return JSON.stringify({ ok: true, result: { terminal: { tail: ['> new question  ', 'New answer.', '', ''], draft } } })
     }
     if (args[1] === 'ps')
       return JSON.stringify({
@@ -531,18 +532,27 @@ test('hover preview answers the last prompt and reply from Orca, on demand', asy
     return JSON.stringify({ ok: true, result: {} })
   })
   const worker = await mountWorker(main, { host: host() })
-  const record = { prompt: 'fix the bug', message: 'Fixed it.', at: 9 }
-  assert.deepEqual(await worker.request('chat.preview', { key: 'tab1' }), { ...record, screen: null })
-  assert.deepEqual(await worker.request('chat.preview', { key: 'nope' }), { prompt: null, message: null, at: null, screen: null })
+  const record = { prompt: 'fix the bug', message: 'Fixed it.', at: 9, screen: null, suggestion: null }
+  assert.deepEqual(await worker.request('chat.preview', { key: 'tab1' }), record)
+  assert.deepEqual(await worker.request('chat.preview', { key: 'nope' }), { ...record, prompt: null, message: null, at: null })
   assert.deepEqual(worker.host.data().storage, {}, 'nothing is stored')
+  assert.equal(reads.length, 0, 'the hover preview never reads the terminal')
 
-  // The reply box asks for the screen too; it is read only when the terminal is well ahead of Orca's record.
+  // The reply box reads the chat's terminal too: for what waits in the agent's input, and for the
+  // screen itself when the terminal is well ahead of Orca's record.
   await worker.request('board.get', { refresh: true })
-  assert.deepEqual(await worker.request('chat.preview', { key: 'tab1', screen: true }), { ...record, screen: null })
+  draft = 'Run the tests'
+  assert.deepEqual(await worker.request('chat.preview', { key: 'tab1', screen: true }), { ...record, suggestion: 'Run the tests' })
+  draft = undefined
   lastOutputAt = 9 + 10 * 60_000
-  assert.deepEqual(await worker.request('chat.preview', { key: 'tab1' }), { ...record, screen: null })
+  assert.deepEqual(await worker.request('chat.preview', { key: 'tab1' }), record)
   assert.deepEqual(await worker.request('chat.preview', { key: 'tab1', screen: true }), { ...record, screen: '> new question\nNew answer.' })
-  assert.deepEqual(reads, [['terminal', 'read', '--terminal', 'term_1', '--screen', '--json']])
+  assert.deepEqual(reads.at(-1), ['terminal', 'read', '--terminal', 'term_1', '--screen', '--json'])
+  assert.equal(reads.length, 2)
+
+  assert.equal(suggestionOf(['● Done.', '❯ Try "how do I log an error?"', '  auto mode on'], null), 'how do I log an error?')
+  assert.equal(suggestionOf(['❯ commit this'], '  from the draft  '), 'from the draft')
+  assert.equal(suggestionOf(['❯ a prompt already sent', '❯'], null), null)
   await worker.deactivate()
 })
 

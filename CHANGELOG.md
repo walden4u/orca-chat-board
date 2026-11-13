@@ -15,6 +15,7 @@
 - **Images in a reply:** paste or drop images into the reply box and Send attaches them to the prompt (Claude Code shows them as `[Image #1]`).
 - **Lighter automatic check:** it runs every 3 seconds only while an agent works or you use the panel, and every 15 seconds otherwise.
 - **"Sent" is not shown as an error:** the line that confirms a sent reply has its own colour.
+- **Tab takes the agent's suggestion:** the reply box shows the next prompt the agent suggests, and Tab fills it in.
 - **Korean UI:** the panel is in Korean when Orca is, or when you pick 한국어 under Language.
 - **Filter:** text typed through an IME (Korean, Japanese, Chinese) arrived as loose letters, because the filter box was replaced on every keystroke.
 - **Bigger hover preview:** as wide as the panel and as tall as the room above or below the card, with the reply shown from its start.

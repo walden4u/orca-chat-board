@@ -314,9 +314,23 @@ export async function pressEnter(handle: string): Promise<void> {
 
 /** The terminal's screen as it is drawn right now, one string per row (`orca terminal read --screen`). */
 export async function readTerminalScreen(handle: string): Promise<string[]> {
-  const result = (await runJson(['terminal', 'read', '--terminal', handle, '--screen'])) as { terminal?: { tail?: unknown } } | null
+  return (await readTerminal(handle)).rows
+}
+
+/**
+ * The screen's rows and `draft`: what sits in an agent's input without being part of the screen,
+ * either text typed and not sent or the agent's own suggestion for your next prompt.
+ */
+export async function readTerminal(handle: string): Promise<{ rows: string[]; draft: string | null }> {
+  const result = (await runJson(['terminal', 'read', '--terminal', handle, '--screen'])) as {
+    terminal?: { tail?: unknown; draft?: unknown }
+  } | null
   const tail = result?.terminal?.tail
-  return Array.isArray(tail) ? tail.filter((row): row is string => typeof row === 'string') : []
+  const draft = result?.terminal?.draft
+  return {
+    rows: Array.isArray(tail) ? tail.filter((row): row is string => typeof row === 'string') : [],
+    draft: typeof draft === 'string' && draft.trim() ? draft : null
+  }
 }
 
 export async function switchTerminal(handle: string): Promise<void> {

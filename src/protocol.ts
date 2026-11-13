@@ -109,9 +109,12 @@ declare module 'orca' {
     'archive.clear': { input: Record<string, never>; output: BoardView }
     /** Your last prompt and the agent's last message, read from Orca when asked (never stored). */
     'chat.preview': {
-      /** `screen`: when Orca's record is behind the terminal, also read the terminal's screen (reply box). */
+      /**
+       * `screen` (the reply box): also read the chat's terminal, for what waits in the agent's input
+       * (`suggestion`) and, when Orca's record is behind the terminal, the screen itself.
+       */
       input: { key: string; screen?: boolean }
-      output: { prompt: string | null; message: string | null; at: number | null; screen: string | null }
+      output: { prompt: string | null; message: string | null; at: number | null; screen: string | null; suggestion: string | null }
     }
     /** Turns the Workspace Board sync on or off (the same setting as in Orca's Settings). */
     'sync.set': { input: { on: boolean }; output: BoardView }

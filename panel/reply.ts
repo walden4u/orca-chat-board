@@ -303,7 +303,15 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   backdrop.onmousedown = (e) => {
     if (e.target === backdrop) leave(handlers.onClosed)
   }
+  // What waits in the agent's own input (its suggestion for your next prompt): shown dimmed in the
+  // empty field, and Tab takes it, as in the agent's terminal.
+  let suggestion: string | null = null
   input.onkeydown = (e) => {
+    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && suggestion && !input.value && !readOnly) {
+      e.preventDefault()
+      input.value = suggestion
+      return
+    }
     // Enter sends, Shift+Enter adds a line. While an IME composes (Korean, Japanese…), Enter
     // belongs to the IME: it confirms the word and must not send (keyCode 229 in older engines).
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return
@@ -318,6 +326,10 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   void loadPreview(target.key, true).then(
     (data) => {
       if (!open) return
+      if (data.suggestion && !readOnly) {
+        suggestion = data.suggestion
+        input.placeholder = t.replySuggestion(suggestion)
+      }
       body.replaceChildren()
       const when = data.at ? ` · ${clock(data.at)}` : ''
       if (data.prompt) body.append(section(t.previewYou, plain(data.prompt), 'you'))
