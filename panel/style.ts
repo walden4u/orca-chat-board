@@ -159,6 +159,8 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .logo { width: 15px; height: 15px; display: inline-flex; flex: none; border-radius: 3px; }
 .logo svg { width: 100%; height: 100%; }
 .logo { color: var(--orca-foreground); object-fit: contain; }
+/* The same line for something done (a message sent): not an error, so not in its colour. */
+.error.notice { background: color-mix(in srgb, var(--orca-primary) 14%, transparent); }
 .logo.initial { align-items: center; justify-content: center; font-size: 10px; font-weight: 700;
   background: var(--orca-muted); color: var(--orca-muted-foreground); }
 .chip.ws { --c: #1fb5b5; }

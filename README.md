@@ -155,15 +155,15 @@ Under **Settings → Plugins → Chat Board**:
 
 ### Check Orca automatically
 
-Orca does not tell plugins when you switch tabs, so while the panel is on screen it asks Orca every 3 seconds. Each check starts the `orca` CLI once (close to a second of work on Windows). Turn the setting off to stop that and update by hand:
+Orca does not tell plugins when you switch tabs, so while the panel is on screen it asks Orca: every 3 seconds while an agent is working or within 30 seconds of you using the panel (moving the pointer over it, sending a reply), and every 15 seconds while nothing moves. Each check starts the `orca` CLI (a second or more of work on Windows), and only one runs at a time. Turn the setting off to stop them and update by hand:
 
 | | On | Off |
 |---|---|---|
 | Agent status icons | live | live |
 | A chat opens or closes | at once | at once |
-| Ring around the open chat | within 3 seconds | when you click a card here, or on ⟳ |
-| Yellow "not seen yet" mark clears | within 3 seconds | when you click the card here, or on ⟳ |
-| Changes made on Orca's Workspace Board (with the sync on) | within about 10 seconds | on ⟳ |
+| Ring around the open chat | within 3 seconds (15 while idle) | when you click a card here, or on ⟳ |
+| Yellow "not seen yet" mark clears | within 3 seconds (15 while idle) | when you click the card here, or on ⟳ |
+| Changes made on Orca's Workspace Board (with the sync on) | within about 10 seconds (15 while idle) | on ⟳ |
 
 Opening the panel always reads the board afresh, and ⟳ works either way.
 

@@ -52,6 +52,7 @@ let dragKey: string | null = null
 /** When the last drag ended; a click right after a drop is not an "open". */
 let dragEndedAt = 0
 let flash: string | null = null
+let flashGood = false
 let pendingRender = false
 /** The filter box and its toolbar, made once and kept in the page (see render). */
 let searchEl: HTMLInputElement | null = null
@@ -63,6 +64,20 @@ const show = { agent: true, workspace: true, status: true, time: true, notes: tr
 let autoCheck = true
 /** An automatic check is on its way to the worker and back. */
 let checking = false
+/** The automatic check's two paces, and how long it stays at the fast one after you last used the panel. */
+const CHECK_MS = 3000
+const CHECK_IDLE_MS = 15_000
+const STAY_ALERT_MS = 30_000
+let alertUntil = Date.now() + STAY_ALERT_MS
+let idling = false
+let checkTimer: ReturnType<typeof setTimeout> | undefined
+let wakeCheck: () => void = () => undefined
+
+/** You are using the panel, or just sent something: check at the fast pace for a while. */
+function stayAlert(): void {
+  alertUntil = Date.now() + STAY_ALERT_MS
+  wakeCheck()
+}
 
 async function loadSettings(): Promise<void> {
   try {
@@ -160,8 +175,10 @@ async function request<T>(name: string, input: unknown): Promise<T | null> {
   }
 }
 
-function showFlash(msg: string): void {
+/** A line under the toolbar for a few seconds: something went wrong, or (`good`) something was done. */
+function showFlash(msg: string, good = false): void {
   flash = msg
+  flashGood = good
   render(true)
   setTimeout(() => {
     if (flash === msg) {
@@ -191,7 +208,7 @@ async function focusChat(c: CardView): Promise<void> {
   if (c.closed) return
   const r = await request<{ ok: boolean; error: string | null }>('chat.focus', { key: c.key })
   if (r && !r.ok) showFlash(r.error === 'closed' ? t.chatClosed : (r.error ?? t.focusFailed))
-  else if (r?.ok && r.error === 'chat-workspace') showFlash(t.chatTabOpened)
+  else if (r?.ok && r.error === 'chat-workspace') showFlash(t.chatTabOpened, true)
   else if (r?.ok && view) {
     for (const x of view.cards) x.active = x.key === c.key
     render()
@@ -266,7 +283,8 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' = 'click'): void 
     {
       onSent: (title) => {
         trace(`reply left ${id}: sent`)
-        showFlash(t.sent(title))
+        showFlash(t.sent(title), true)
+        stayAlert()
         openNextWaiting(true)
       },
       // Closing a box is done with that chat, not with the queue: the next one that waits opens.
@@ -696,7 +714,7 @@ function render(force = false): void {
   toolbar.append(...(view?.synced ? [] : [addCol]), sync, refresh)
   const children: Node[] = []
   const error = flash ?? (view?.error ? t.listFailed(view.error) : null)
-  if (error) children.push(el('div', { class: 'error', role: 'status' }, error))
+  if (error) children.push(el('div', { class: flash && flashGood ? 'error notice' : 'error', role: 'status' }, error))
 
   if (!view) {
     children.push(el('div', { class: 'empty' }, t.loading))
@@ -773,6 +791,7 @@ function boot(): void {
     card.outcome = outcome
     card.mainState = main
     render()
+    wakeCheck()
   })
   // Orca has no event for switching tabs: while the panel is on screen, ask every few seconds which
   // chat is open (open-chat highlight) and whether an unseen chat was opened. Redraw only on change.
@@ -784,22 +803,42 @@ function boot(): void {
       (v?.columns ?? []).map((c) => [c.id, c.title]),
       v?.orcaNames === true
     ])
-  setInterval(() => {
-    // Each check starts the orca CLI once, so it can be turned off; ⟳ then does it on demand.
-    // One check at a time: when a check takes longer than the interval (a busy machine), asking
-    // again would only queue up in the worker and hold back everything else, Send included.
+  // Each check starts the orca CLI (a second or more of work), so it runs at two paces: every few
+  // seconds while an agent is working or you are using the panel, and seldom while nothing moves.
+  // It can also be turned off; ⟳ then does it on demand.
+  // One check at a time: when a check takes longer than the pace (a busy machine), asking again
+  // would only queue up in the worker and hold back everything else, Send included.
+  const check = async () => {
     if (!autoCheck || checking || document.visibilityState !== 'visible' || !view) return
     checking = true
-    void orca.plugin
-      .request('seen.check', {})
-      .then(
-        (v) => {
-          if (liveKey(v as BoardView) !== liveKey(view)) setView(v as BoardView)
-        },
-        () => undefined
-      )
-      .finally(() => (checking = false))
-  }, 3000)
+    try {
+      const v = await orca.plugin.request('seen.check', {})
+      if (liveKey(v as BoardView) !== liveKey(view)) setView(v as BoardView)
+    } catch {
+      // The next check tries again.
+    } finally {
+      checking = false
+    }
+  }
+  const isAlert = () => Date.now() < alertUntil || (view?.cards ?? []).some((c) => !c.closed && c.state === 'working')
+  const schedule = () => {
+    idling = !isAlert()
+    checkTimer = setTimeout(() => void check().then(schedule), idling ? CHECK_IDLE_MS : CHECK_MS)
+  }
+  // Something started moving while the check was at its slow pace: check now, then keep the fast one.
+  wakeCheck = () => {
+    if (!idling || !isAlert()) return
+    clearTimeout(checkTimer)
+    idling = false
+    void check().then(schedule)
+  }
+  schedule()
+  let moved = 0
+  document.addEventListener('pointermove', () => {
+    if (Date.now() - moved < 1000) return
+    moved = Date.now()
+    stayAlert()
+  })
   // A checked chat may have finished while the panel was out of sight.
   document.addEventListener('visibilitychange', () => openNextWaiting())
   // Relative times ("5m") tick locally; this never calls Orca.

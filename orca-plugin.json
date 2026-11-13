@@ -70,7 +70,7 @@
       {
         "key": "autoCheck",
         "title": "Check Orca automatically",
-        "description": "While the panel is on screen, asks Orca every 3 seconds which chat is open, and with the Workspace Board sync on what changed on Orca's board. Each check starts the orca CLI once. Turned off, the board updates when you click ⟳, when you open the panel and when a chat opens or closes; agent status icons stay live.",
+        "description": "While the panel is on screen, asks Orca which chat is open, and with the Workspace Board sync on what changed on Orca's board: every 3 seconds while an agent works or you use the panel, every 15 seconds otherwise. Each check starts the orca CLI once. Turned off, the board updates when you click ⟳, when you open the panel and when a chat opens or closes; agent status icons stay live.",
         "type": "boolean",
         "default": true
       },
