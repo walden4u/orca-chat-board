@@ -327,6 +327,7 @@ export default function activate(orca: OrcaWorkerApi): void {
     }
     return mutate((s) => updateCard(s, patch.key, patch))
   })
+  orca.panels.handle('card.seen', ({ key }) => mutate((s) => markUnseen(s, [key], null)))
   orca.panels.handle('card.delete', ({ key }) => mutate((s) => deleteCard(s, key)))
   orca.panels.handle('archive.clear', () => mutate(clearArchived))
 

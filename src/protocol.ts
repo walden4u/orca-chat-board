@@ -30,6 +30,8 @@ export type StoredCard = {
   closedAt: number | null
   /** When the agent finished (or started waiting) while you were not looking; null once seen. */
   unseenAt?: number | null
+  /** You checked this chat: when its agent finishes unseen, the panel opens its reply box by itself. */
+  watch?: boolean
   addedAt: number
 }
 
@@ -84,7 +86,7 @@ export type MonitorInfo = {
   label: string | null
 }
 
-export type CardPatch = { key: string; label?: string; note?: string }
+export type CardPatch = { key: string; label?: string; note?: string; watch?: boolean }
 
 declare module 'orca' {
   interface PluginRequests {
@@ -99,6 +101,8 @@ declare module 'orca' {
     'card.delete': { input: { key: string }; output: BoardView }
     /** Re-checks which chats are on screen: open-chat highlight, and clears their unseen mark. */
     'seen.check': { input: Record<string, never>; output: BoardView }
+    /** You read this chat in its reply box: clears its unseen mark. */
+    'card.seen': { input: { key: string }; output: BoardView }
     /** Forgets every closed chat. */
     'archive.clear': { input: Record<string, never>; output: BoardView }
     /** Your last prompt and the agent's last message, read from Orca when asked (never stored). */

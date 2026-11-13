@@ -258,6 +258,32 @@ test('a chat that finishes while you look elsewhere is marked unseen until you s
   await worker.deactivate()
 })
 
+test('a checked chat keeps its check, and reading it in the reply box clears its unseen mark', async () => {
+  fakeCli(() => [term(1), term(2)])
+  const worker = await mountWorker(main, { host: host() })
+  await worker.request('board.get', { refresh: true })
+  const card = async (key: string) => ((await worker.request('board.get', { refresh: true })) as BoardView).cards.find((c) => c.key === key)!
+
+  await worker.request('card.update', { key: 'tab1', watch: true })
+  assert.equal((await card('tab1')).watch, true)
+  assert.equal((await card('tab2')).watch, undefined)
+  // A note edit leaves the check alone.
+  await worker.request('card.update', { key: 'tab1', note: 'n' })
+  assert.equal((await card('tab1')).watch, true)
+
+  const status = (state: 'working' | 'done', receivedAt: number) =>
+    worker.emit('agent.status.changed', { workspaceId: null, paneKey: 'term_1', terminalId: 'term_1', state, receivedAt })
+  await status('working', 10)
+  await status('done', 20)
+  assert.equal((await card('tab1')).unseenAt, 20)
+  const seen = (await worker.request('card.seen', { key: 'tab1' })) as BoardView
+  assert.equal(seen.cards.find((c) => c.key === 'tab1')!.unseenAt, null)
+
+  await worker.request('card.update', { key: 'tab1', watch: false })
+  assert.equal((await card('tab1')).watch, undefined)
+  await worker.deactivate()
+})
+
 test('active tabs are read from every split group of a workspace', () => {
   const tabs = activeTabsByWorktree([
     {

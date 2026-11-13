@@ -118,6 +118,13 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
   box-shadow: 0 0 0 3px color-mix(in srgb, #f5c518 25%, transparent);
 }
 .column-head .unseen-dot, .column.collapsed .unseen-dot { margin-top: 0; }
+/* Checked: this chat's reply box opens by itself when it finishes. The mark is the switch. */
+.watch {
+  flex: none; width: 15px; height: 15px; margin-top: 1px; padding: 0; border-radius: 3px;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; line-height: 1;
+  background: var(--orca-primary); color: var(--orca-primary-foreground); border: 1px solid var(--orca-primary);
+}
+.watch:hover { background: transparent; color: var(--orca-foreground); }
 
 .status { width: 16px; height: 16px; flex: none; display: inline-flex; margin-top: 1px; }
 .status svg { width: 100%; height: 100%; }
@@ -212,6 +219,8 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .reply-input { resize: vertical; min-height: 4.4em; max-height: 40vh; line-height: 1.45; }
 .reply-row { display: flex; align-items: center; gap: 8px; }
 .reply-status { flex: 1; min-width: 0; color: var(--orca-destructive); word-break: break-word; }
+.reply-waiting { flex: none; color: var(--orca-muted-foreground); white-space: nowrap; }
+.reply-next { border-color: var(--orca-border); padding: 3px 10px; }
 .reply-row .primary { padding: 3px 14px; }
 .reply-row .primary:disabled { opacity: .5; cursor: default; }
 

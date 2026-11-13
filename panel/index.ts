@@ -7,7 +7,7 @@ import { STATUS_ICON, type StatusKind } from './icons.ts'
 import { locale, setLanguage, t } from './i18n.ts'
 import { isStale } from '../src/monitor.ts'
 import { hidePreview, schedulePreview } from './preview.ts'
-import { openReply } from './reply.ts'
+import { openReply, replyKey, setReplyWaiting } from './reply.ts'
 
 const INTERRUPTED = new Set(['interruption', 'failure', 'cancellation'])
 
@@ -172,6 +172,7 @@ function showFlash(msg: string): void {
 function setView(next: BoardView | null): void {
   if (next) view = next
   render()
+  openNextWaiting()
 }
 
 const isEditing = () => {
@@ -193,6 +194,88 @@ async function focusChat(c: CardView): Promise<void> {
     for (const x of view.cards) x.active = x.key === c.key
     render()
   }
+}
+
+async function setWatch(c: CardView, watch: boolean): Promise<void> {
+  if (watch) c.watch = true
+  else delete c.watch
+  render(true)
+  setView(await request<BoardView>('card.update', { key: c.key, watch }))
+}
+
+/** The check on a checked card: always shown, and a click on it unchecks. */
+function watchMark(c: CardView): HTMLElement {
+  const mark = el('button', { class: 'watch', title: t.watchOn, 'aria-label': t.watchOn, 'aria-pressed': 'true' }, '✓')
+  mark.onclick = (e) => (e.stopPropagation(), void setWatch(c, false))
+  return mark
+}
+
+// ---------- reply box and its queue ----------
+
+/** Checked chats that finished and were not seen yet, in the order they finished. */
+function waitingCards(except?: string | null): CardView[] {
+  return (view?.cards ?? [])
+    .filter((c) => c.watch && !c.closed && !!c.unseenAt && c.key !== except)
+    .sort((a, b) => (a.unseenAt ?? 0) - (b.unseenAt ?? 0))
+}
+
+/** You closed a box by hand: the ones behind it wait until another checked chat finishes. */
+let queueHeldAt = 0
+
+function showReply(c: CardView, auto = false): void {
+  hidePreview()
+  const kind = statusOf(c)
+  if (c.unseenAt) {
+    // Read here counts as seen (it leaves the queue too), at once and then in the worker.
+    c.unseenAt = null
+    render()
+    void request<BoardView>('card.seen', { key: c.key }).then((v) => setView(v))
+  }
+  openReply(
+    {
+      key: c.key,
+      title: titleOf(c),
+      workspace: c.worktreeName,
+      chatTab: !!c.sessionId,
+      working: kind === 'working',
+      blocked: kind === 'blocked',
+      auto,
+      waiting: waitingCards(c.key).length
+    },
+    {
+      onSent: (title) => {
+        showFlash(t.sent(title))
+        openNextWaiting(true)
+      },
+      onNext: () => openNextWaiting(true),
+      onClosed: () => (queueHeldAt = Date.now()),
+      onOpenChat: () => {
+        queueHeldAt = Date.now()
+        void focusChat(c)
+      }
+    }
+  )
+}
+
+/**
+ * Opens the reply box of the checked chat that has waited longest. By itself (`asked` false) only
+ * when nothing of yours is in the way: no box open, no edit or drag going on, the panel on screen,
+ * and not right after you closed a box by hand.
+ */
+function openNextWaiting(asked = false): void {
+  const open = replyKey()
+  if (open) {
+    setReplyWaiting(waitingCards(open).length)
+    return
+  }
+  const queue = waitingCards()
+  if (!queue.length) return
+  if (!asked) {
+    if (editingCard || renamingColumn || dragKey || document.visibilityState !== 'visible') return
+    if (!queue.some((c) => (c.unseenAt ?? 0) > queueHeldAt)) return
+  }
+  queueHeldAt = 0
+  showReply(queue[0]!, !asked)
 }
 
 function moveLocal(key: string, column: string, index: number): void {
@@ -240,6 +323,7 @@ function renderCard(c: CardView): HTMLElement {
     el(
       'div',
       { class: 'card-top' },
+      c.watch && !c.closed ? watchMark(c) : null,
       c.unseenAt && !c.closed ? el('span', { class: 'unseen-dot', title: t.unseen, role: 'img', 'aria-label': t.unseen }) : null,
       el('span', { class: 'card-title' }, titleOf(c)),
       stateBadge
@@ -261,14 +345,13 @@ function renderCard(c: CardView): HTMLElement {
     open.onclick = (e) => (e.stopPropagation(), void focusChat(c))
     actions.append(open)
   }
-  /** The reply box: what a click on the card opens. From there, or with a double-click, the chat itself. */
-  const reply = () => {
-    hidePreview()
-    openReply(
-      { key: c.key, title: titleOf(c), workspace: c.worktreeName, chatTab: !!c.sessionId, working: kind === 'working' },
-      { onSent: (title) => showFlash(t.sent(title)), onOpenChat: () => void focusChat(c) }
-    )
+  if (!c.closed && !c.watch) {
+    const watch = el('button', { class: 'ghost', title: t.watchOff, 'aria-label': t.watchOff, 'aria-pressed': 'false' }, '✓')
+    watch.onclick = (e) => (e.stopPropagation(), void setWatch(c, true))
+    actions.append(watch)
   }
+  /** The reply box: what a click on the card opens. From there, or with a double-click, the chat itself. */
+  const reply = () => showReply(c)
   const edit = el('button', { class: 'ghost', title: t.editCard }, '✎')
   edit.onclick = (e) => {
     e.stopPropagation()
@@ -680,6 +763,8 @@ function boot(): void {
       () => undefined
     )
   }, 3000)
+  // A checked chat may have finished while the panel was out of sight.
+  document.addEventListener('visibilitychange', () => openNextWaiting())
   // Relative times ("5m") tick locally; this never calls Orca.
   setInterval(() => render(), 30_000)
 

@@ -68,6 +68,7 @@ Every agent tab you have open, in any workspace, is one card. With the default s
 | Move a chat | Drag its card to another column, or up and down within a column. |
 | Rename a chat or add a note | Click ✎ on the card. Enter saves, Shift+Enter starts a new line in the note. |
 | See what a chat was about | Hover its card for a moment. You get your last message and the agent's last reply. |
+| Have a chat come to you when it finishes | Hover its card and click ✓. The card keeps a check mark; click the mark to uncheck. |
 | Find a chat | Type in the filter box. It matches title, note, workspace and agent. |
 | Update the board now | Click ⟳. |
 | Clean up closed chats | They sit in **Archived**. Remove one with ✕ or all with **Clear**. |
@@ -125,6 +126,7 @@ This is not an Orca interface, so an Orca update can change it. When the read fa
 - Hover a card for a moment to see your last message and the agent's last reply.
 - Click a card to open its reply box, double-click it to open its chat in Orca (↗ does the same). Dragging moves the card instead.
 - The reply box shows your last message and the agent's whole last reply, with a field to answer them. Send types your text into that chat's terminal as your next prompt, without leaving the board. What you typed and did not send is kept for that chat until the panel reloads. Orca's chat tabs can be read there but not answered, because Orca has no command to send to them.
+- **Checked chats open by themselves.** Check a card (✓ on hover) and its reply box opens when that chat's agent finishes or asks you something while you are not looking at it. Answer, or press **Next** to leave it unanswered, and the box of the next checked chat that finished opens, in the order they finished; the box says how many are waiting. A box that opened by itself does not take the keyboard, so what you are typing elsewhere stays there, and nothing opens while a box, an edit or a drag is in progress. Closing a box with ✕ holds the rest back until another checked chat finishes. Loops do not open a box for each run, and a chat that asks for permission opens read-only, with ↗ to answer it in the chat.
 - ✎ renames the chat's Orca tab and edits the card's note. Enter saves; Shift+Enter adds a new line to the note.
 - When you start talking to a chat in **Backlog**, its card moves to **In progress**. You can turn this off.
 - A chat you close goes to **Archived** and keeps its column and note. Remove one card with ✕, or all of them with **Clear**.

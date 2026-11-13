@@ -11,14 +11,45 @@ export type ReplyTarget = {
   /** An Orca chat tab: it can be read, but Orca has no way to send to one. */
   chatTab: boolean
   working: boolean
+  /** The agent asks for permission: that is answered in the chat itself, not with a message. */
+  blocked: boolean
+  /**
+   * The box opened by itself (a checked chat finished). It then leaves the keyboard where it is:
+   * you may be typing in a terminal, and that text must not land here.
+   */
+  auto: boolean
+  /** Checked chats that finished and wait behind this one. */
+  waiting: number
 }
+
+export type ReplyHandlers = {
+  onSent: (title: string) => void
+  /** Show the chat itself in Orca. */
+  onOpenChat: () => void
+  /** Read, not answered: on to the next waiting chat. */
+  onNext: () => void
+  /** Closed by hand (✕, Escape, a click outside). */
+  onClosed: () => void
+}
+
+/** The second click of a double-click on a card lands on the box that the first one opened. */
+const DOUBLE_CLICK_MS = 500
 
 /** What you typed and did not send, per chat, until the panel reloads. */
 const drafts = new Map<string, string>()
-let close: (() => void) | null = null
+let current: { key: string; shut: () => void; setWaiting: (n: number) => void } | null = null
 
+/** The chat whose box is open, if any. */
+export const replyKey = (): string | null => current?.key ?? null
+
+/** Closes the box without telling anyone (the draft is kept). */
 export function closeReply(): void {
-  close?.()
+  current?.shut()
+}
+
+/** The number of chats waiting behind the open box changed. */
+export function setReplyWaiting(n: number): void {
+  current?.setWaiting(n)
 }
 
 function node<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -34,18 +65,10 @@ function section(who: string, text: string, cls: string): HTMLElement {
   return s
 }
 
-export type ReplyHandlers = {
-  onSent: (title: string) => void
-  /** Show the chat itself in Orca (the box is already closed). */
-  onOpenChat: () => void
-}
-
-/** The second click of a double-click on a card lands on the box that the first one opened. */
-const DOUBLE_CLICK_MS = 500
-
-export function openReply(target: ReplyTarget, { onSent, onOpenChat }: ReplyHandlers): void {
+export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   closeReply()
   const openedAt = Date.now()
+  const readOnly = target.chatTab || target.blocked
 
   const backdrop = node('div', 'reply-backdrop')
   const dialog = node('div', 'reply')
@@ -60,37 +83,47 @@ export function openReply(target: ReplyTarget, { onSent, onOpenChat }: ReplyHand
   const toChat = node('button', 'ghost', '↗')
   toChat.title = t.openChat
   toChat.setAttribute('aria-label', t.openChat)
+  const waiting = node('span', 'reply-waiting')
   head.append(node('span', 'reply-title', target.title))
   if (target.workspace) head.append(node('span', 'chip ws', target.workspace))
-  head.append(toChat, shut)
+  head.append(waiting, toChat, shut)
 
   const body = node('div', 'reply-body')
   body.append(node('div', 'preview-text preview-empty', t.replyLoading))
 
   const foot = node('div', 'reply-foot')
-  const hint = target.chatTab ? t.replyChatTab : target.working ? t.replyWorking : ''
+  const hint = target.chatTab ? t.replyChatTab : target.blocked ? t.replyBlocked : target.working ? t.replyWorking : ''
   if (hint) foot.append(node('div', 'reply-hint', hint))
   const input = node('textarea', 'reply-input')
   input.rows = 3
   input.placeholder = t.replyPlaceholder
   input.setAttribute('aria-label', t.replyTitle(target.title))
   input.value = drafts.get(target.key) ?? ''
-  input.disabled = target.chatTab
+  input.disabled = readOnly
   const status = node('span', 'reply-status')
   status.setAttribute('role', 'status')
+  const next = node('button', 'ghost reply-next', t.next)
+  next.title = t.nextHint
   const send = node('button', 'primary', t.send)
-  send.disabled = target.chatTab
+  send.disabled = readOnly
   const row = node('div', 'reply-row')
-  row.append(status, send)
+  row.append(status, next, send)
   foot.append(input, row)
 
   dialog.append(head, body, foot)
   backdrop.append(dialog)
 
+  const setWaiting = (n: number) => {
+    waiting.textContent = n > 0 ? t.replyWaiting(n) : ''
+    waiting.hidden = n <= 0
+    next.hidden = n <= 0
+  }
+  setWaiting(target.waiting)
+
   let open = true
   let busy = false
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape' && !e.isComposing && !busy) shutBox()
+    if (e.key === 'Escape' && !e.isComposing && !busy) leave(handlers.onClosed)
   }
   const shutBox = () => {
     if (!open) return
@@ -99,13 +132,19 @@ export function openReply(target: ReplyTarget, { onSent, onOpenChat }: ReplyHand
     else drafts.delete(target.key)
     document.removeEventListener('keydown', onKey, true)
     backdrop.remove()
-    close = null
+    current = null
   }
-  close = shutBox
+  /** Closes the box, then says how it was left. */
+  const leave = (then: () => void) => {
+    if (busy) return
+    shutBox()
+    then()
+  }
+  current = { key: target.key, shut: shutBox, setWaiting }
 
   const submit = async () => {
     const text = input.value.trim()
-    if (busy || !text || target.chatTab) return
+    if (busy || !text || readOnly) return
     busy = true
     send.disabled = true
     input.readOnly = true
@@ -121,7 +160,7 @@ export function openReply(target: ReplyTarget, { onSent, onOpenChat }: ReplyHand
     if (result.ok) {
       input.value = ''
       shutBox()
-      onSent(target.title)
+      handlers.onSent(target.title)
       return
     }
     send.disabled = false
@@ -132,28 +171,25 @@ export function openReply(target: ReplyTarget, { onSent, onOpenChat }: ReplyHand
     input.focus()
   }
 
-  const goToChat = () => {
-    if (busy) return
-    shutBox()
-    onOpenChat()
-  }
-  shut.onclick = shutBox
-  toChat.onclick = goToChat
+  shut.onclick = () => leave(handlers.onClosed)
+  toChat.onclick = () => leave(handlers.onOpenChat)
+  next.onclick = () => leave(handlers.onNext)
   send.onclick = () => void submit()
   // Double-click on a card: its first click opened this box, its second one arrives here.
+  // Not for a box that opened by itself: a double-click meant for something else could meet it.
   backdrop.addEventListener(
     'mousedown',
     (e) => {
-      if (e.detail < 2 || Date.now() - openedAt > DOUBLE_CLICK_MS) return
+      if (target.auto || e.detail < 2 || Date.now() - openedAt > DOUBLE_CLICK_MS) return
       e.preventDefault()
       e.stopPropagation()
-      goToChat()
+      leave(handlers.onOpenChat)
     },
     true
   )
   // A click on the dimmed board closes the box; what you typed is kept for this chat.
   backdrop.onmousedown = (e) => {
-    if (e.target === backdrop && !busy) shutBox()
+    if (e.target === backdrop) leave(handlers.onClosed)
   }
   input.onkeydown = (e) => {
     // Enter sends, Shift+Enter adds a line. While an IME composes (Korean, Japanese…), Enter
@@ -165,7 +201,7 @@ export function openReply(target: ReplyTarget, { onSent, onOpenChat }: ReplyHand
   document.addEventListener('keydown', onKey, true)
 
   document.body.append(backdrop)
-  if (!target.chatTab) setTimeout(() => input.focus(), 0)
+  if (!readOnly && !target.auto) setTimeout(() => input.focus(), 0)
 
   void loadPreview(target.key, true).then(
     (data) => {
