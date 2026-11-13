@@ -79,6 +79,8 @@ const show = { agent: true, workspace: true, status: true, time: true, notes: tr
 let autoCheck = true
 /** The "Show the chat in Orca with its reply box" setting. */
 let followChat = false
+/** Setting: checked chats that wait for your answer are drawn pink, and so is the toolbar's edge. */
+let pinkWaiting = false
 /** An automatic check is on its way to the worker and back. */
 let checking = false
 /** The automatic check's two paces, and how long it stays at the fast one after you last used the panel. */
@@ -107,6 +109,7 @@ async function loadSettings(): Promise<void> {
     show.preview = s.showPreview !== false
     autoCheck = s.autoCheck !== false
     followChat = s.followChat === true
+    pinkWaiting = s.pinkWaiting === true
     setLanguage(s.language)
   } catch {
     // Settings unavailable (older approval): keep everything visible.
@@ -251,10 +254,20 @@ function watchMark(c: CardView): HTMLElement {
 
 // ---------- reply box and its queue ----------
 
+/** A checked chat whose agent is not working: it finished or asked, and the next word is yours. */
+function answerDue(c: CardView): boolean {
+  return !!c.watch && !c.closed && (c.state === 'done' || c.state === 'waiting' || c.state === 'blocked')
+}
+
+/** A checked chat that finished and was not seen yet: its reply box is due to open. */
+function isWaiting(c: CardView): boolean {
+  return !!c.watch && !c.closed && !!c.unseenAt && c.unseenAt !== readHere.get(c.key)
+}
+
 /** Checked chats that finished and were not seen yet, in the order they finished. */
 function waitingCards(except?: string | null): CardView[] {
   return (view?.cards ?? [])
-    .filter((c) => c.watch && !c.closed && !!c.unseenAt && c.unseenAt !== readHere.get(c.key) && c.key !== except)
+    .filter((c) => isWaiting(c) && c.key !== except)
     .sort((a, b) => (a.unseenAt ?? 0) - (b.unseenAt ?? 0))
 }
 
@@ -391,7 +404,7 @@ function renderCard(c: CardView): HTMLElement {
   const card = el(
     'div',
     {
-      class: `card${c.closed ? ' closed' : kind ? ` st-${kind}` : ''}${c.unseenAt && !c.closed ? ' unseen' : ''}${c.active ? ' active' : ''}`,
+      class: `card${c.closed ? ' closed' : kind ? ` st-${kind}` : ''}${c.unseenAt && !c.closed ? ' unseen' : ''}${c.active ? ' active' : ''}${pinkWaiting && answerDue(c) ? ' answer-due' : ''}`,
       draggable: !c.closed && editingCard !== c.key ? 'true' : false,
       tabindex: '0',
       'data-key': c.key,
@@ -776,6 +789,7 @@ function render(force = false): void {
 
   const toolbar = (toolbarEl ??= el('div', { class: 'toolbar' }, search))
   while (toolbar.lastChild && toolbar.lastChild !== search) toolbar.lastChild.remove()
+  toolbar.classList.toggle('answer-due', pinkWaiting && (view?.cards ?? []).some(answerDue))
   // The archive is put away until you ask for it: this button shows how many chats it holds and
   // opens it under the board (and puts it away again).
   const archivedCount = (view?.cards ?? []).filter((c) => c.closed).length

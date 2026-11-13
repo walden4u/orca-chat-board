@@ -113,6 +113,13 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
   box-shadow: 0 0 0 1px color-mix(in srgb, #f5c518 55%, transparent);
 }
 .card.unseen .card-title { font-weight: 650; }
+/* Setting "pinkWaiting": a checked chat that waits for your answer, and the toolbar's edge while there is one. */
+.card.answer-due {
+  background: color-mix(in srgb, #ff5fa2 22%, var(--orca-background));
+  border-color: color-mix(in srgb, #ff5fa2 80%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, #ff5fa2 60%, transparent);
+}
+.toolbar.answer-due { border-bottom: 2px solid #ff5fa2; background: color-mix(in srgb, #ff5fa2 10%, transparent); }
 .unseen-dot {
   width: 8px; height: 8px; border-radius: 50%; flex: none; background: #f5c518; margin-top: 5px;
   box-shadow: 0 0 0 3px color-mix(in srgb, #f5c518 25%, transparent);

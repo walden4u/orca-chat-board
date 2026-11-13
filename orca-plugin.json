@@ -82,6 +82,13 @@
         "default": false
       },
       {
+        "key": "pinkWaiting",
+        "title": "답을 기다리는 체크 대화를 핑크로 표시",
+        "description": "체크한 대화의 에이전트가 일을 끝냈거나 질문·권한 요청을 하고 멈춰 있으면, 그 카드의 바탕과 보드 위쪽 띠가 핑크가 됩니다. 답을 보내 에이전트가 다시 일하기 시작하거나 체크를 풀면 꺼집니다.",
+        "type": "boolean",
+        "default": false
+      },
+      {
         "key": "showAgent",
         "title": "에이전트 로고 표시",
         "description": "카드마다 Claude, Cursor 등의 로고(또는 에이전트 이름)를 보여 줍니다.",

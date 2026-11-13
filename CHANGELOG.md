@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Pink for chats that wait for you** (setting, off by default): a checked chat whose agent finished or asked something gets a pink card, and the toolbar gets a pink edge while there is one. It stays until the agent works again (you answered) or you uncheck the card.
 - **The check has a fixed place:** every open card shows the box at its top left, empty or checked, and a click there turns it on or off. Before, an unchecked card had the button only among the hover buttons.
 - **Archive from the card:** a new button on an open card (▾, among the hover buttons) closes that chat's tab in Orca, which moves the card to the archive. It asks first with a second click, and says so when the agent is working or when the chat cannot be opened again (anything but a Claude terminal chat). Orca's chat tabs cannot be closed from outside.
 - **Sync with the Workspace Board** (off by default): columns become Orca's workspace statuses. Dragging a chat sets its workspace's status, and moving a workspace on Orca's board moves its chats. Turn it on in Settings or with the ⇄ button.

@@ -9,7 +9,8 @@ A kanban of your **agent chats**: the Claude, Codex, Cursor, Gemini and other ag
 > - the board works on Windows (upstream issue #1);
 > - it can follow Orca's Workspace Board in both directions;
 > - a reply box on every card, to read a chat's last exchange and answer it, images included, without leaving the board;
-> - checked chats, whose reply box opens by itself when they finish;
+> - checked chats, whose reply box opens by itself when they finish, and which can turn pink while they wait for your answer;
+> - a button on the card that archives a chat by closing its tab in Orca;
 > - a way to open an archived Claude chat again after Orca restarts;
 > - a Korean UI.
 >
@@ -92,6 +93,8 @@ Every tab that runs an agent is one card: terminal tabs, and Orca's chat tabs on
 | Rename a chat or add a note | Click ✎ on the card. Enter saves, Shift+Enter starts a new line in the note. The name is the chat's Orca tab name. |
 | Find a chat | Type in the filter box. It matches title, note, workspace and agent. |
 | Update the board now | Click ⟳. |
+| See at a glance which chats wait for your answer | Check them and turn on the pink setting. See [Pink: chats that wait for your answer](#pink-chats-that-wait-for-your-answer). |
+| Put a chat away | Hover its card, click ▾, then click the red question. See [The archive](#the-archive-and-continuing-a-chat). |
 | Continue a chat that was closed | Click **Archive N** in the toolbar. See [The archive](#the-archive-and-continuing-a-chat). |
 
 ### What a card shows
@@ -100,8 +103,11 @@ Every tab that runs an agent is one card: terminal tabs, and Orca's chat tabs on
 - **Yellow card with a dot:** the agent stopped while you were looking at another chat, like Orca's unread tab. Its column header gets a dot too. The mark clears when you read the chat in its reply box, open it, or when the agent starts working again.
 - **Coloured ring:** the chat you have open in Orca now.
 - **Pulse icon and "next 3m":** a loop or watcher is running there. That covers `/loop` (`ScheduleWakeup`), `CronCreate` schedules and `Monitor` watches. When a loop misses its run by about one interval, the card shows "no signal".
-- **Check mark:** you checked this chat. Click the mark to uncheck.
+- **Box at the top left:** the check. Every open card has it at the same place: empty when the chat is not checked, filled with ✓ when it is. A click on it turns the check on or off. Archived cards have no box.
+- **Pink card:** with the pink setting on, a checked chat whose agent has stopped and waits for you. See [Pink: chats that wait for your answer](#pink-chats-that-wait-for-your-answer).
 - **Logo, workspace, time and note:** the agent's logo (the same icons Orca uses, for all 45 agents it knows), the workspace's name, the time since the last change, and your note.
+
+Hovering a card also brings up its buttons at the top right: ↗ (go to the chat in Orca), ✎ (rename, note) and ▾ (archive). An archived card has ✎ and ✕ (remove from the board) there.
 
 Hovering a card shows your last message and the agent's last reply in a popover, as wide as the panel and as tall as the room above or below the card.
 
@@ -146,9 +152,53 @@ Check a card (the box at its top left, always there; click again to uncheck) and
 
 The check is saved with the card. Chats that are not checked only turn yellow.
 
+### Pink: chats that wait for your answer
+
+A reply box that opened by itself is easy to miss once it is closed, and a finished chat looks like any other card. The setting **Pink for checked chats that wait for an answer** (shown in Korean in this fork: "답을 기다리는 체크 대화를 핑크로 표시", off by default) marks the chats where the next word is yours.
+
+**When a card is pink.** All three must hold:
+
+1. the setting is on;
+2. the card is checked;
+3. its agent is not working: it finished (check icon), it asked you something (hourglass), or it needs permission (alert).
+
+Whether you have already looked at the chat does not matter. A chat you read an hour ago and did not answer is still pink.
+
+**When the pink goes away.**
+
+- You answer, and the agent starts working again. The card is pink again when that turn ends.
+- You uncheck the card. Do this for a chat you do not mean to answer.
+- The chat is archived, or the setting is turned off.
+
+**What turns pink.**
+
+- The card: its background and border.
+- The toolbar: a pink tint and a pink line under it while at least one card is pink. This shows that something waits even when that card is scrolled out of view or its column is collapsed.
+
+**Pink and yellow.** Yellow is the "not seen yet" mark and works for every chat, checked or not; it clears as soon as you look. Pink is about the answer, only for checked chats, and stays until you answer. On a checked chat that is both, pink is drawn.
+
+**It is not the reply queue.** Which reply box opens next still depends on what you have not seen yet (see above). Pink only colours the board; it opens nothing.
+
+A chat with no status icon (Orca has not reported a status for it, see [Limitations](#limitations)) is never pink.
+
 ## The archive, and continuing a chat
 
-A chat you close goes to the archive and keeps its column, note and check. You can close it in Orca, or from its card: **▾** among the card's hover buttons closes that chat's tab in Orca. It asks first with a second click, because the agent in that tab stops, and it warns when the chat cannot be opened again (anything but a Claude terminal chat). Orca's own chat tabs cannot be closed this way. The archive is put away by default: **Archive N** in the toolbar shows how many chats it holds and opens it under the board, up to 40% of the panel's height. The same button, or the archive's title line, puts it away again. Remove one card with ✕, or all of them with **Clear**.
+A chat you close goes to the archive and keeps its column, note and check. A card is on the board only while its tab is open in Orca, so there are two ways to archive one, and both close the tab:
+
+- **In Orca:** close the chat's tab. The card moves to the archive at the next check (within 15 seconds, or at once with ⟳).
+- **From the card:** hover the card and click **▾** among the buttons at its top right. The button turns red and asks; click it again within 3 seconds to go on, or leave it and nothing happens. Orca then closes that chat's whole tab and the card moves to the archive at once. If that chat's reply box was open, it closes too.
+
+The red question depends on the chat:
+
+| The chat | The question | What you lose |
+|---|---|---|
+| A Claude chat in a terminal tab, not working | "Close the tab?" | Nothing: it can be continued from the archive. |
+| Any chat whose agent is working | "Stop the agent and close?" | The turn that is running. |
+| Another agent's chat | "Close? Cannot be opened again" | The way back from the board: only Claude chats have ↻ Continue. |
+
+Orca's own chat tabs (not terminals) cannot be closed from outside; the button says so and leaves the chat alone.
+
+The archive itself is put away by default: **Archive N** in the toolbar shows how many chats it holds and opens it under the board, up to 40% of the panel's height. The same button, or the archive's title line, puts it away again. Remove one card with ✕, or all of them with **Clear**.
 
 Orca does not keep agent tabs across a restart, so after one most cards are in the archive. To continue such a chat, click **↻ Continue** on its card:
 
@@ -182,19 +232,22 @@ This is not an Orca interface, so an Orca update can change it. When the read fa
 
 Under **Settings → Plugins → Chat Board**:
 
-| Setting | Default |
-|---|---|
-| Move to In progress when you start a chat | on |
-| Sync with the Workspace Board | off |
-| Check Orca automatically | on |
-| Show the chat in Orca with its reply box | off |
-| Show agent logo | on |
-| Show workspace | on |
-| Show agent status icon | on |
-| Show time since last change | on |
-| Show notes | on |
-| Show a preview on hover | on |
-| Language (Auto, English, Español, 한국어) | Auto |
+| Setting | Default | What it does |
+|---|---|---|
+| Move to In progress when you start a chat | on | Talking to a chat in Backlog moves its card to In progress. Does nothing while the sync is on. |
+| Sync with the Workspace Board | off | Columns become Orca's workspace statuses. See [Sync](#sync-with-the-workspace-board). |
+| Check Orca automatically | on | The panel asks Orca what changed while it is on screen. See below. |
+| Show the chat in Orca with its reply box | off | Orca switches to a chat's tab when its reply box opens. See [Reply to a chat](#reply-to-a-chat). |
+| Pink for checked chats that wait for an answer | off | Checked chats whose agent has stopped are drawn pink. See [Pink](#pink-chats-that-wait-for-your-answer). |
+| Show agent logo | on | The agent's logo, or its name, on each card. |
+| Show workspace | on | The workspace's name on each card. |
+| Show agent status icon | on | Working, waiting, done, interrupted, needs permission. |
+| Show time since last change | on | Time since the agent's status changed or the chat last printed something. |
+| Show notes | on | Your note under the card's title. |
+| Show a preview on hover | on | The popover with the last exchange. |
+| Language (Auto, English, Español, 한국어) | Auto | Auto follows Orca's language. |
+
+The settings screen of this fork is in Korean, whatever the panel's language: Orca takes a setting's title and description from the plugin's manifest, which holds one language. The names above are the English ones in the same order.
 
 ### Check Orca automatically
 
@@ -229,6 +282,8 @@ Opening the panel always reads the board afresh, and ⟳ works either way.
 | A column is called `status-5` | The status names could not be read from Orca. Look for `status names not read` in the log; meanwhile, double-click the title to rename the column. |
 | Double-clicking a column title does nothing | The sync is on and the name is Orca's. Rename the status in Orca. |
 | A card did not move after you changed a status in Orca | Wait 10 seconds or click ⟳. |
+| A checked chat is not pink | Check the three conditions in [Pink](#pink-chats-that-wait-for-your-answer): the setting is on (it is off by default), the box on the card is checked, and the agent is not working. A card with no status icon is never pink. After changing the setting, click ⟳ if the board does not follow. |
+| A card you archived with ▾ is back on the board | Its tab is still open in Orca, so the close did not go through. Look for `archive failed` in `orca plugin logs local.chat-board`. |
 | A card has no status icon | Orca has not reported a status for that session yet. See [Limitations](#limitations). |
 
 ## Permissions
@@ -265,7 +320,7 @@ Orca asks you to approve these when you load the plugin. Here is what each one i
 
 ### What stays where
 
-The plugin makes no network requests and sends nothing anywhere. Some of what Orca's CLI returns, such as a preview of each terminal's latest output and the agent's last message, prompt or tool input, is never stored by the plugin; it keeps only titles, agent type and status. The hover preview and the reply box read your last prompt and the agent's last reply from Orca when you ask, show them, and keep them for a few seconds in memory only. A terminal screen read for the reply box is shown and not stored. The plugin sends input to an agent only when you press Send or ↻ Continue, and only the text you typed, the images you attached, or `/resume`.
+The plugin makes no network requests and sends nothing anywhere. Some of what Orca's CLI returns, such as a preview of each terminal's latest output and the agent's last message, prompt or tool input, is never stored by the plugin; it keeps only titles, agent type and status. The hover preview and the reply box read your last prompt and the agent's last reply from Orca when you ask, show them, and keep them for a few seconds in memory only. A terminal screen read for the reply box is shown and not stored. The plugin sends input to an agent only when you press Send or ↻ Continue, and only the text you typed, the images you attached, or `/resume`. It closes a tab only when you click ▾ on that chat's card and confirm.
 
 ## Limitations
 
