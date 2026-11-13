@@ -63,11 +63,11 @@ Every agent tab you have open, in any workspace, is one card. With the default s
 
 | You want to | Do this |
 |---|---|
-| Go to a chat | Click its card. Orca switches to that workspace and tab. |
+| Read the whole reply and answer it | Click the card. Type your message and press Enter (Shift+Enter starts a new line). |
+| Go to a chat | Double-click its card, or click ↗ on the card or in the reply box. Orca switches to that workspace and tab. |
 | Move a chat | Drag its card to another column, or up and down within a column. |
 | Rename a chat or add a note | Click ✎ on the card. Enter saves, Shift+Enter starts a new line in the note. |
 | See what a chat was about | Hover its card for a moment. You get your last message and the agent's last reply. |
-| Read the whole reply and answer it | Click ↩ on the card. Type your message and press Enter (Shift+Enter starts a new line). |
 | Find a chat | Type in the filter box. It matches title, note, workspace and agent. |
 | Update the board now | Click ⟳. |
 | Clean up closed chats | They sit in **Archived**. Remove one with ✕ or all with **Clear**. |
@@ -123,13 +123,13 @@ This is not an Orca interface, so an Orca update can change it. When the read fa
 
 **Working with chats**
 - Hover a card for a moment to see your last message and the agent's last reply.
-- Click a card to open its chat. Dragging moves the card instead.
-- ↩ opens the reply box: your last message and the agent's whole last reply, with a field to answer. Send types your text into that chat's terminal as your next prompt, without leaving the board. What you typed and did not send is kept for that chat until the panel reloads. Orca's chat tabs can be read there but not answered, because Orca has no command to send to them.
+- Click a card to open its reply box, double-click it to open its chat in Orca (↗ does the same). Dragging moves the card instead.
+- The reply box shows your last message and the agent's whole last reply, with a field to answer them. Send types your text into that chat's terminal as your next prompt, without leaving the board. What you typed and did not send is kept for that chat until the panel reloads. Orca's chat tabs can be read there but not answered, because Orca has no command to send to them.
 - ✎ renames the chat's Orca tab and edits the card's note. Enter saves; Shift+Enter adds a new line to the note.
 - When you start talking to a chat in **Backlog**, its card moves to **In progress**. You can turn this off.
 - A chat you close goes to **Archived** and keeps its column and note. Remove one card with ✕, or all of them with **Clear**.
 
-The UI follows Orca's theme (light or dark) and language (Spanish for `es-*`, English otherwise).
+The UI follows Orca's theme (light or dark) and language (Spanish for `es-*`, Korean for `ko-*`, English otherwise).
 
 ![Chat Board in light theme](assets/screenshot-light.png)
 
@@ -148,7 +148,7 @@ Under **Settings → Plugins → Chat Board**:
 | Show time since last change | on |
 | Show notes | on |
 | Show a preview on hover | on |
-| Language (Auto, English, Español) | Auto |
+| Language (Auto, English, Español, 한국어) | Auto |
 
 ### Check Orca automatically
 

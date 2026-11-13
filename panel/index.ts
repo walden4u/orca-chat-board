@@ -259,16 +259,15 @@ function renderCard(c: CardView): HTMLElement {
   if (!c.closed) {
     const open = el('button', { class: 'ghost', title: t.openChat }, '↗')
     open.onclick = (e) => (e.stopPropagation(), void focusChat(c))
-    const reply = el('button', { class: 'ghost', title: t.reply, 'aria-label': t.reply }, '↩')
-    reply.onclick = (e) => {
-      e.stopPropagation()
-      hidePreview()
-      openReply(
-        { key: c.key, title: titleOf(c), workspace: c.worktreeName, chatTab: !!c.sessionId, working: kind === 'working' },
-        (title) => showFlash(t.sent(title))
-      )
-    }
-    actions.append(open, reply)
+    actions.append(open)
+  }
+  /** The reply box: what a click on the card opens. From there, or with a double-click, the chat itself. */
+  const reply = () => {
+    hidePreview()
+    openReply(
+      { key: c.key, title: titleOf(c), workspace: c.worktreeName, chatTab: !!c.sessionId, working: kind === 'working' },
+      { onSent: (title) => showFlash(t.sent(title)), onOpenChat: () => void focusChat(c) }
+    )
   }
   const edit = el('button', { class: 'ghost', title: t.editCard }, '✎')
   edit.onclick = (e) => {
@@ -289,15 +288,15 @@ function renderCard(c: CardView): HTMLElement {
 
   if (editingCard === c.key) card.append(renderEditor(c))
 
-  // A short click opens the chat; drags, buttons and the editor's fields keep their own clicks.
+  // A short click opens the reply box, a double-click the chat; drags, buttons and the editor's
+  // fields keep their own clicks. The second click of a double-click lands on the box (reply.ts).
   card.onclick = (e) => {
-    if (editingCard === c.key || Date.now() - dragEndedAt < 300) return
+    if (c.closed || editingCard === c.key || Date.now() - dragEndedAt < 300) return
     if ((e.target as Element).closest('button, input, textarea, a, .card-actions')) return
-    hidePreview()
-    void focusChat(c)
+    reply()
   }
   card.onkeydown = (e) => {
-    if (e.target === card && e.key === 'Enter') void focusChat(c)
+    if (e.target === card && e.key === 'Enter' && !c.closed) reply()
   }
   card.onmouseenter = () => {
     if (show.preview && !c.closed && !dragKey && editingCard !== c.key) schedulePreview(c.key, card)

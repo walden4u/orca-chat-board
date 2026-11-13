@@ -119,18 +119,20 @@
       {
         "key": "language",
         "title": "Language",
-        "description": "Auto follows Orca's language (Spanish for es-*, English otherwise).",
+        "description": "Auto follows Orca's language (Spanish for es-*, Korean for ko-*, English otherwise).",
         "type": "string",
         "default": "auto",
         "enum": [
           "auto",
           "en",
-          "es"
+          "es",
+          "ko"
         ],
         "enumLabels": [
           "Auto",
           "English",
-          "Español"
+          "Español",
+          "한국어"
         ]
       }
     ],

@@ -186,6 +186,7 @@ test('spinner prefixes are stripped from titles', () => {
 test('default columns follow the UI language', async () => {
   assert.equal(defaultColumns('es-AR')[1].title, 'En curso')
   assert.equal(defaultColumns('en-US')[1].title, 'In progress')
+  assert.equal(defaultColumns('ko-KR')[1].title, '진행 중')
   assert.equal(defaultColumns('fr')[1].title, 'In progress')
   fakeCli(() => [])
   const worker = await mountWorker(main, { host: host() })

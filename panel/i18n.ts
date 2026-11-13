@@ -1,4 +1,4 @@
-// UI strings. Spanish when Orca's UI language is Spanish, English otherwise.
+// UI strings. Spanish or Korean when Orca's UI language is, English otherwise.
 import type { StatusKind } from './icons.ts'
 
 const en = {
@@ -26,7 +26,7 @@ const en = {
   chatClosed: 'That chat is already closed.',
   chatTabOpened: "Opened its workspace. Orca can't switch to a chat tab from a plugin yet.",
   focusFailed: 'Could not open the chat',
-  openHint: 'Click to open the chat',
+  openHint: 'Click to read and reply, double-click to open the chat',
   openNow: 'Open now',
   openChat: 'Open chat',
   editCard: 'Rename tab and edit note',
@@ -51,12 +51,11 @@ const en = {
   previewYou: 'You',
   previewAgent: 'Agent',
   previewEmpty: 'No messages yet',
-  reply: 'Read the last exchange and reply',
   replyTitle: (title: string) => `Reply to ${title}`,
   replyLoading: 'Reading from Orca…',
   replyPlaceholder: 'Your message (Enter sends, Shift+Enter new line)',
   replyWorking: 'The agent is working right now.',
-  replyChatTab: 'Orca cannot send to its chat tabs from a plugin yet. Click the card to open the chat.',
+  replyChatTab: 'Orca cannot send to its chat tabs from a plugin yet. Click ↗ to open the chat.',
   replyFailed: (detail: string) => `Not sent: ${detail}`,
   send: 'Send',
   sending: 'Sending…',
@@ -108,7 +107,7 @@ const es: Strings = {
   chatClosed: 'Ese chat ya está cerrado.',
   chatTabOpened: 'Abrí su workspace. Orca todavía no deja que un plugin cambie a una pestaña de chat.',
   focusFailed: 'No se pudo abrir el chat',
-  openHint: 'Click para abrir el chat',
+  openHint: 'Click para leer y responder, doble click para abrir el chat',
   openNow: 'Abierto ahora',
   openChat: 'Abrir chat',
   editCard: 'Renombrar tab y editar nota',
@@ -133,12 +132,11 @@ const es: Strings = {
   previewYou: 'Vos',
   previewAgent: 'Agente',
   previewEmpty: 'Todavía no hay mensajes',
-  reply: 'Leer el último intercambio y responder',
   replyTitle: (title: string) => `Responder a ${title}`,
   replyLoading: 'Leyendo de Orca…',
   replyPlaceholder: 'Tu mensaje (Enter envía, Shift+Enter nueva línea)',
   replyWorking: 'El agente está trabajando ahora.',
-  replyChatTab: 'Orca todavía no permite enviar a sus tabs de chat desde un plugin. Hacé click en la tarjeta para abrir el chat.',
+  replyChatTab: 'Orca todavía no permite enviar a sus tabs de chat desde un plugin. Hacé click en ↗ para abrir el chat.',
   replyFailed: (detail: string) => `No se envió: ${detail}`,
   send: 'Enviar',
   sending: 'Enviando…',
@@ -163,6 +161,85 @@ const es: Strings = {
   confirmClear: (n) => `¿Borrar ${n}?`
 }
 
+const ko: Strings = {
+  status: {
+    working: '작업 중',
+    waiting: '답변 대기',
+    done: '완료',
+    interrupted: '중단됨',
+    blocked: '권한 필요',
+    closed: '닫힘',
+    monitoring: '모니터링 중',
+    stale: '신호 없음'
+  },
+  since: (label, ago) => `${label} · ${ago} 전`,
+  now: '방금',
+  monitorKind: { loop: '반복', cron: '예약 작업', monitor: '모니터' },
+  nextRun: (d) => `다음 ${d}`,
+  dueNow: '곧 실행',
+  lastRun: (d) => `마지막 ${d}`,
+  noSignal: (d) => `신호 없음 ${d}`,
+  every: (d) => `${d}마다`,
+  untitled: '(제목 없음)',
+  error: (msg) => `오류: ${msg}`,
+  listFailed: (detail) => `대화 목록을 불러오지 못했습니다: ${detail}`,
+  chatClosed: '이미 닫힌 대화입니다.',
+  chatTabOpened: '워크스페이스를 열었습니다. Orca는 아직 플러그인에서 채팅 탭으로 전환할 수 없습니다.',
+  focusFailed: '대화를 열지 못했습니다',
+  openHint: '클릭: 읽고 답하기, 더블클릭: 대화 열기',
+  openNow: '지금 열려 있음',
+  openChat: '대화 열기',
+  editCard: '탭 이름 바꾸기와 메모 편집',
+  deleteCard: '보드에서 제거',
+  name: '이름',
+  cardName: '카드 이름',
+  tabName: '탭 이름',
+  tabNameHint: '탭 이름 (비우면 자동)',
+  note: '메모',
+  noteHint: '메모 (Enter 저장, Shift+Enter 줄바꿈)',
+  save: '저장',
+  cancel: '취소',
+  columnName: '컬럼 이름',
+  renameHint: '더블클릭해서 이름 바꾸기',
+  renameInOrca: '워크스페이스 상태입니다. 이름은 워크스페이스 보드 설정에서 바꿉니다',
+  moveLeft: '컬럼을 왼쪽으로',
+  moveRight: '컬럼을 오른쪽으로',
+  deleteColumn: '컬럼 삭제 (카드는 첫 컬럼으로 이동)',
+  confirmDelete: '삭제할까요?',
+  noMatches: '일치하는 대화 없음',
+  unseen: '다른 곳을 보는 사이에 끝남',
+  previewYou: '나',
+  previewAgent: '에이전트',
+  previewEmpty: '아직 메시지가 없습니다',
+  replyTitle: (title) => `${title}에 답장`,
+  replyLoading: 'Orca에서 읽는 중…',
+  replyPlaceholder: '메시지 입력 (Enter 보내기, Shift+Enter 줄바꿈)',
+  replyWorking: '에이전트가 지금 작업 중입니다.',
+  replyChatTab: 'Orca는 아직 플러그인에서 채팅 탭으로 보낼 수 없습니다. ↗를 눌러 대화를 여세요.',
+  replyFailed: (detail) => `보내지 못했습니다: ${detail}`,
+  send: '보내기',
+  sending: '보내는 중…',
+  sent: (title) => `${title}에 보냈습니다`,
+  close: '닫기',
+  columnUnseen: (n) => `안 읽음 ${n}개`,
+  dropHere: '대화를 여기로 끌어 놓기',
+  filter: '대화 필터…',
+  filterLabel: '필터',
+  refresh: '대화 목록 새로고침',
+  addColumn: '컬럼 추가',
+  addColumnButton: '+ 컬럼',
+  syncOn: '워크스페이스 보드와 동기화 중: 컬럼이 워크스페이스 상태입니다. 클릭하면 중지합니다.',
+  syncOff: '워크스페이스 보드와 동기화: 워크스페이스 상태를 컬럼으로 사용',
+  newColumn: '새 컬럼',
+  collapse: '컬럼 접기',
+  expand: (title, n) => `${title} (${n}): 클릭해서 펼치기`,
+  loading: '대화를 불러오는 중…',
+  archived: (n) => `보관됨 (${n})`,
+  clearArchive: '비우기',
+  clearArchiveHint: '보관된 카드를 모두 제거',
+  confirmClear: (n) => `${n}개를 제거할까요?`
+}
+
 const orcaLocale: string = (globalThis as { orca?: { locale?: string } }).orca?.locale ?? 'en'
 
 /** The effective UI language tag; also sent to the worker to name a new board's default columns. */
@@ -170,11 +247,12 @@ export let locale: string = orcaLocale
 export let t: Strings = pick(orcaLocale)
 
 function pick(tag: string): Strings {
-  return tag.toLowerCase().startsWith('es') ? es : en
+  const lang = tag.toLowerCase()
+  return lang.startsWith('es') ? es : lang.startsWith('ko') ? ko : en
 }
 
-/** `auto` follows Orca; `en` / `es` force a language. */
+/** `auto` follows Orca; `en` / `es` / `ko` force a language. */
 export function setLanguage(choice: unknown): void {
-  locale = choice === 'en' || choice === 'es' ? choice : orcaLocale
+  locale = choice === 'en' || choice === 'es' || choice === 'ko' ? choice : orcaLocale
   t = pick(locale)
 }

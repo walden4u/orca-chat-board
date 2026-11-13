@@ -34,8 +34,18 @@ function section(who: string, text: string, cls: string): HTMLElement {
   return s
 }
 
-export function openReply(target: ReplyTarget, onSent: (title: string) => void): void {
+export type ReplyHandlers = {
+  onSent: (title: string) => void
+  /** Show the chat itself in Orca (the box is already closed). */
+  onOpenChat: () => void
+}
+
+/** The second click of a double-click on a card lands on the box that the first one opened. */
+const DOUBLE_CLICK_MS = 500
+
+export function openReply(target: ReplyTarget, { onSent, onOpenChat }: ReplyHandlers): void {
   closeReply()
+  const openedAt = Date.now()
 
   const backdrop = node('div', 'reply-backdrop')
   const dialog = node('div', 'reply')
@@ -47,9 +57,12 @@ export function openReply(target: ReplyTarget, onSent: (title: string) => void):
   const shut = node('button', 'ghost', '✕')
   shut.title = t.close
   shut.setAttribute('aria-label', t.close)
+  const toChat = node('button', 'ghost', '↗')
+  toChat.title = t.openChat
+  toChat.setAttribute('aria-label', t.openChat)
   head.append(node('span', 'reply-title', target.title))
   if (target.workspace) head.append(node('span', 'chip ws', target.workspace))
-  head.append(shut)
+  head.append(toChat, shut)
 
   const body = node('div', 'reply-body')
   body.append(node('div', 'preview-text preview-empty', t.replyLoading))
@@ -119,8 +132,25 @@ export function openReply(target: ReplyTarget, onSent: (title: string) => void):
     input.focus()
   }
 
+  const goToChat = () => {
+    if (busy) return
+    shutBox()
+    onOpenChat()
+  }
   shut.onclick = shutBox
+  toChat.onclick = goToChat
   send.onclick = () => void submit()
+  // Double-click on a card: its first click opened this box, its second one arrives here.
+  backdrop.addEventListener(
+    'mousedown',
+    (e) => {
+      if (e.detail < 2 || Date.now() - openedAt > DOUBLE_CLICK_MS) return
+      e.preventDefault()
+      e.stopPropagation()
+      goToChat()
+    },
+    true
+  )
   // A click on the dimmed board closes the box; what you typed is kept for this chat.
   backdrop.onmousedown = (e) => {
     if (e.target === backdrop && !busy) shutBox()

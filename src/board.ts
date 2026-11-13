@@ -19,12 +19,14 @@ export type LiveTerminal = {
 
 const COLUMN_TITLES = {
   en: { backlog: 'Backlog', doing: 'In progress', waiting: 'In review', done: 'Done' },
-  es: { backlog: 'Backlog', doing: 'En curso', waiting: 'En revisión', done: 'Hecho' }
+  es: { backlog: 'Backlog', doing: 'En curso', waiting: 'En revisión', done: 'Hecho' },
+  ko: { backlog: '백로그', doing: '진행 중', waiting: '검토 중', done: '완료' }
 }
 
-/** Default columns, named in the UI language (Spanish for `es-*`, English otherwise). */
+/** Default columns, named in the UI language (Spanish for `es-*`, Korean for `ko-*`, English otherwise). */
 export function defaultColumns(locale = 'en'): Column[] {
-  const titles = locale.toLowerCase().startsWith('es') ? COLUMN_TITLES.es : COLUMN_TITLES.en
+  const lang = locale.toLowerCase()
+  const titles = lang.startsWith('es') ? COLUMN_TITLES.es : lang.startsWith('ko') ? COLUMN_TITLES.ko : COLUMN_TITLES.en
   return (['backlog', 'doing', 'waiting', 'done'] as const).map((id) => ({ id, title: titles[id] }))
 }
 
