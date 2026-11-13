@@ -1,7 +1,7 @@
 // Chat Board worker: keeps the board in storage, lists chats through the orca CLI, tracks agent
 // status from events, and answers the panel.
 import type { OrcaWorkerApi } from 'orca/worker'
-import type { AgentState, BoardState, BoardView, CardView } from './protocol.ts'
+import type { AgentState, BoardState, BoardView, CardView, Column } from './protocol.ts'
 import {
   activeTabsByWorktree,
   chatsOf,
@@ -30,6 +30,7 @@ import {
   type PsWorktree
 } from './cli.ts'
 import { applyToolCall, monitorView, onRun, type StoredMonitor } from './monitor.ts'
+import { readWorkspaceStatusNames } from './profile.ts'
 import { applyWorkspaceStatuses, editSyncedColumns, moveWorkspaceCards } from './sync.ts'
 
 const BOARD_KEY = 'board'
@@ -53,6 +54,9 @@ export default function activate(orca: OrcaWorkerApi): void {
   /** Workspace statuses from the last `orca worktree list`, by worktree id (only read while synced). */
   let workspaceStatus = new Map<string, string>()
   let workspaceStatusAt = 0
+  /** Orca's statuses with their names, from its profile; null while they cannot be read. */
+  let statusNames: Column[] | null = null
+  let statusNamesError = ''
 
   // Every read-modify-write of storage goes through this queue.
   let queue: Promise<unknown> = Promise.resolve()
@@ -95,7 +99,8 @@ export default function activate(orca: OrcaWorkerApi): void {
         active: !c.closed && visible.has(c.key)
       }
     })
-    return { columns: state.columns, cards, refreshedAt, error: lastError, synced: state.synced === true }
+    const synced = state.synced === true
+    return { columns: state.columns, cards, refreshedAt, error: lastError, synced, orcaNames: synced && statusNames !== null }
   }
 
   async function seedStatus(): Promise<void> {
@@ -152,9 +157,19 @@ export default function activate(orca: OrcaWorkerApi): void {
       } catch (err) {
         orca.log(`worktree list failed: ${(err as Error).message.split('\n')[0]}`)
       }
+      try {
+        statusNames = await readWorkspaceStatusNames()
+        statusNamesError = ''
+      } catch (err) {
+        // The board keeps the names it has, and they can be edited here again.
+        statusNames = null
+        const reason = (err as Error).message.split('\n')[0] ?? ''
+        if (reason !== statusNamesError) orca.log(`status names not read from Orca's profile: ${reason}`)
+        statusNamesError = reason
+      }
     }
     // Nothing read yet: leave the board alone rather than rebuild its columns from nothing.
-    return workspaceStatusAt === 0 ? state : applyWorkspaceStatuses(state, workspaceStatus)
+    return workspaceStatusAt === 0 ? state : applyWorkspaceStatuses(state, workspaceStatus, statusNames)
   }
 
   const keyOfHandle = (handle: string) => Object.keys(handles).find((k) => handles[k] === handle) ?? null
@@ -277,7 +292,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   })
   orca.panels.handle('board.columns.set', async ({ columns }) => {
     const synced = (await loadBoard()).synced === true && (await syncOn())
-    return mutate((s) => setColumns(s, synced ? editSyncedColumns(s.columns, columns, workspaceStatus.values()) : columns))
+    return mutate((s) => setColumns(s, synced ? editSyncedColumns(s.columns, columns, workspaceStatus.values(), statusNames) : columns))
   })
   /** Re-lists and tells the panels; the sync setting changed, so the columns may be other ones now. */
   const resync = () =>

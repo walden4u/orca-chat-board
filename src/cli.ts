@@ -24,14 +24,14 @@ export type OrcaCommand = { kind: 'exec' | 'cmd'; file: string; args: string[]; 
 /** A ready-to-spawn process: the arguments for execFile. */
 export type OrcaInvocation = { file: string; args: string[]; verbatim: boolean; env?: Record<string, string> }
 
-function envGet(host: OrcaHost, name: string): string | undefined {
+export function envGet(host: OrcaHost, name: string): string | undefined {
   if (host.platform !== 'win32') return host.env[name]
   // Windows variable names are case-insensitive (`Path`, `PATH`, `ComSpec`).
   const key = Object.keys(host.env).find((k) => k.toUpperCase() === name.toUpperCase())
   return key === undefined ? undefined : host.env[key]
 }
 
-function join(host: OrcaHost, ...parts: string[]): string {
+export function joinPath(host: OrcaHost, ...parts: string[]): string {
   const sep = host.platform === 'win32' ? '\\' : '/'
   return parts.map((p, i) => (i === 0 ? p.replace(/[\\/]+$/, '') : p.replace(/^[\\/]+|[\\/]+$/g, ''))).join(sep)
 }
@@ -46,8 +46,8 @@ function resourcesDir(host: OrcaHost): string | null {
   const exe = host.execPath
   if (!exe || !/^orca/i.test(exe.split(/[\\/]/).pop() ?? '')) return null
   // macOS: Orca.app/Contents/MacOS/Orca -> Orca.app/Contents/Resources; else <install>/resources.
-  if (host.platform === 'darwin') return join(host, dirname(dirname(exe)), 'Resources')
-  return join(host, dirname(exe), 'resources')
+  if (host.platform === 'darwin') return joinPath(host, dirname(dirname(exe)), 'Resources')
+  return joinPath(host, dirname(exe), 'resources')
 }
 
 /** Orca's bundled launcher name: `orca-ide` on Linux (bare `orca` there is the GNOME screen reader). */
@@ -61,7 +61,7 @@ export function findOnWindowsPath(host: OrcaHost, name: string, exists: (path: s
   const dirs = (envGet(host, 'PATH') ?? '').split(';').map((d) => d.trim().replace(/^"(.*)"$/, '$1')).filter(Boolean)
   for (const dir of dirs) {
     for (const ext of exts) {
-      const path = join(host, dir, name + ext.toLowerCase())
+      const path = joinPath(host, dir, name + ext.toLowerCase())
       if (exists(path)) return path
     }
   }
@@ -86,9 +86,9 @@ export function orcaCommands(host: OrcaHost, exists: (path: string) => boolean):
   }
   const resources = resourcesDir(host)
   if (resources) {
-    const launcher = join(host, resources, 'bin', launcherName(host.platform))
+    const launcher = joinPath(host, resources, 'bin', launcherName(host.platform))
     if (exists(launcher)) add({ kind: 'exec', file: launcher, args: [] })
-    const script = join(host, resources, 'app.asar.unpacked', 'out', 'cli', 'index.js')
+    const script = joinPath(host, resources, 'app.asar.unpacked', 'out', 'cli', 'index.js')
     if (host.execPath && exists(host.execPath) && exists(script)) {
       add({ kind: 'exec', file: host.execPath, args: [script], env: { ELECTRON_RUN_AS_NODE: '1' } })
     }
@@ -98,10 +98,10 @@ export function orcaCommands(host: OrcaHost, exists: (path: string) => boolean):
     const found = findOnWindowsPath(host, 'orca', exists)
     if (found) add(windowsCommand(found))
   } else if (host.platform === 'linux') {
-    if (home && exists(join(host, home, '.local', 'bin', 'orca-ide'))) add({ kind: 'exec', file: join(host, home, '.local', 'bin', 'orca-ide'), args: [] })
+    if (home && exists(joinPath(host, home, '.local', 'bin', 'orca-ide'))) add({ kind: 'exec', file: joinPath(host, home, '.local', 'bin', 'orca-ide'), args: [] })
     add({ kind: 'exec', file: 'orca-ide', args: [] })
   } else {
-    const fixed = ['/usr/local/bin/orca', '/opt/homebrew/bin/orca', ...(home ? [join(host, home, '.local', 'bin', 'orca')] : [])]
+    const fixed = ['/usr/local/bin/orca', '/opt/homebrew/bin/orca', ...(home ? [joinPath(host, home, '.local', 'bin', 'orca')] : [])]
     for (const file of fixed) if (exists(file)) add({ kind: 'exec', file, args: [] })
     add({ kind: 'exec', file: 'orca', args: [] })
   }
@@ -130,7 +130,7 @@ export function orcaInvocation(command: OrcaCommand, args: string[], host: OrcaH
   const line = [command.file.replace(CMD_META, '^$1'), ...[...command.args, ...args].map((a) => quoteCmdArg(a))].join(' ')
   const comspec = envGet(host, 'ComSpec')
   const systemRoot = envGet(host, 'SystemRoot')
-  const shell = comspec && /^[a-z]:\\/i.test(comspec) ? comspec : systemRoot ? join(host, systemRoot, 'System32', 'cmd.exe') : 'cmd.exe'
+  const shell = comspec && /^[a-z]:\\/i.test(comspec) ? comspec : systemRoot ? joinPath(host, systemRoot, 'System32', 'cmd.exe') : 'cmd.exe'
   return { file: shell, args: ['/d', '/s', '/c', `"${line}"`], verbatim: true, env: command.env }
 }
 
@@ -141,7 +141,7 @@ export function orcaInvocation(command: OrcaCommand, args: string[], host: OrcaH
 export function extraEnv(host: OrcaHost, env?: Record<string, string>): Record<string, string> | undefined {
   const profile = envGet(host, 'USERPROFILE')
   if (host.platform !== 'win32' || envGet(host, 'APPDATA') || !profile) return env
-  return { APPDATA: join(host, profile, 'AppData', 'Roaming'), ...env }
+  return { APPDATA: joinPath(host, profile, 'AppData', 'Roaming'), ...env }
 }
 
 /** The reason the CLI gives on stdout (`{"ok":false,"error":{"message":…}}`) when it fails. */

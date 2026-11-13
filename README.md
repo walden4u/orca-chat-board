@@ -81,11 +81,18 @@ Click **⇄** in the panel's toolbar (or turn on **Sync with the Workspace Board
 - **Drag a chat here, and Orca follows.** Dropping a card in another column sets that workspace's status in Orca. The other chats of the same workspace move along, because a workspace has only one status.
 - **Move a workspace in Orca, and the chats follow here.** Orca does not announce the change, so the panel shows it within about 10 seconds. Click ⟳ to see it at once.
 - **Orca's side wins.** At every refresh the cards are put back in the column of their workspace's status.
-- **Name your custom statuses once.** Orca does not give plugins the name of a custom status, so its column first appears as `status-5` or similar. Double-click the title and type the name you use in Orca.
-- **Columns can be reordered (‹ ›), renamed and collapsed (⇤) here, but not added or deleted.** Add and remove statuses in Orca.
+- **Column names are Orca's status names.** Rename a status in Orca and the column follows at the next refresh. In Orca, open the Workspace Board, then its **Board settings** menu; the **Statuses** list there renames, adds and removes statuses. While the names come from Orca, a column cannot be renamed here.
+- **Columns can be reordered (‹ ›) and collapsed (⇤) here, but not added or deleted.** A status you add in Orca gets a column at once, and one you remove loses its column once no workspace uses it.
+- **If the names cannot be read**, the columns keep the names they had, a new custom status shows up under its id (`status-5`), and you can rename columns here again by double-clicking the title. See [how the names are read](#how-the-status-names-are-read).
 - **"Move to In progress when you start a chat" is off while synced**, since the status now belongs to the workspace.
 
-Click ⇄ again to stop. The columns stay as they are and become ordinary columns that you can add to and delete.
+Click ⇄ again to stop. The columns stay as they are and become ordinary columns that you can rename, add to and delete.
+
+#### How the status names are read
+
+Neither Orca's CLI nor its plugin API tells a plugin what a status is called. So, only while the sync is on, the worker opens Orca's own profile database read-only and takes the status list from it: `profile-state.db` in the active profile's folder under Orca's data folder (`%APPDATA%\orca` on Windows), document `ui`, field `workspaceStatuses`. It reads the id and the label of each status and nothing else, and never writes to that file.
+
+This is not an Orca interface, so an Orca update can change it. When the read fails for any reason, the worker logs `status names not read from Orca's profile` once and the board carries on with the names it has. It has been tried on Windows with Orca 1.4.255 only.
 
 ### When something looks wrong
 
@@ -93,7 +100,8 @@ Click ⇄ again to stop. The columns stay as they are and become ordinary column
 |---|---|
 | The board is empty or shows an error | Run `orca plugin logs local.chat-board`. A failed CLI call is logged with the reason the CLI gave. |
 | The plugin is listed but not `running` or `idle` | It is waiting for approval. Run `orca plugin dev reload .` and follow the `--approve` command it prints. |
-| A column is called `status-5` | It is a custom status. Rename the column once (see above). |
+| A column is called `status-5` | The status names could not be read from Orca. Look for `status names not read` in `orca plugin logs local.chat-board`; meanwhile, double-click the title to rename the column. |
+| Double-clicking a column title does nothing | The sync is on and the name is Orca's. Rename the status in Orca. |
 | A card did not move after you changed a status in Orca | Wait 10 seconds or click ⟳. |
 | A card has no status icon | Orca has not reported a status for that session yet. See [Limitations](#limitations). |
 
@@ -131,6 +139,7 @@ Under **Settings → Plugins → Chat Board**:
 |---|---|
 | Move to In progress when you start a chat | on |
 | Sync with the Workspace Board | off |
+| Check Orca automatically | on |
 | Show agent logo | on |
 | Show workspace | on |
 | Show agent status icon | on |
@@ -139,6 +148,20 @@ Under **Settings → Plugins → Chat Board**:
 | Show a preview on hover | on |
 | Language (Auto, English, Español) | Auto |
 
+### Check Orca automatically
+
+Orca does not tell plugins when you switch tabs, so while the panel is on screen it asks Orca every 3 seconds. Each check starts the `orca` CLI once (close to a second of work on Windows). Turn the setting off to stop that and update by hand:
+
+| | On | Off |
+|---|---|---|
+| Agent status icons | live | live |
+| A chat opens or closes | at once | at once |
+| Ring around the open chat | within 3 seconds | when you click a card here, or on ⟳ |
+| Yellow "not seen yet" mark clears | within 3 seconds | when you click the card here, or on ⟳ |
+| Changes made on Orca's Workspace Board (with the sync on) | within about 10 seconds | on ⟳ |
+
+Opening the panel always reads the board afresh, and ⟳ works either way.
+
 ### Sync with the Workspace Board
 
 Turn it on in Settings or with the ⇄ button in the panel. The board then follows Orca's Workspace Board in both directions:
@@ -146,7 +169,7 @@ Turn it on in Settings or with the ⇄ button in the panel. The board then follo
 - The columns are Orca's workspace statuses (Todo, In progress, In review, Done and your custom ones).
 - Dragging a chat to another column sets its workspace's status in Orca. The other chats of that workspace move with it, because a workspace has one status.
 - Moving a workspace on Orca's board moves its chats here. Orca does not announce the change, so the panel picks it up within about 10 seconds, or at once with ⟳.
-- You can reorder, rename and collapse columns here. Statuses are added and removed in Orca. Orca does not tell plugins the name of a custom status, so it first shows up under its id (`status-5`); rename the column once.
+- You can reorder and collapse columns here. Statuses are renamed, added and removed in Orca, and the columns follow. The names come from Orca's profile database, read-only (see [how the names are read](#how-the-status-names-are-read)); if that fails, a custom status shows up under its id (`status-5`) and you can rename the column here.
 - "Move to In progress when you start a chat" does not apply while synced.
 
 ## Permissions
@@ -155,7 +178,7 @@ Orca asks you to approve these when you install the plugin. Here is what each on
 
 | Permission | What the plugin does with it |
 |---|---|
-| **Runs its own code** (Node worker) | Lists your chats in every workspace, opens a chat and renames its tab. The worker only ever runs these Orca CLI commands: `orca terminal list`, `orca terminal switch`, `orca terminal rename`, `orca worktree ps` (agents and status, chat tabs included), `orca chat rename` and `orca worktree activate`; with the Workspace Board sync on, also `orca worktree list` and `orca worktree set --workspace-status`. The plugin API alone sees only the focused workspace and cannot open or rename tabs. |
+| **Runs its own code** (Node worker) | Lists your chats in every workspace, opens a chat and renames its tab. The worker only ever runs these Orca CLI commands: `orca terminal list`, `orca terminal switch`, `orca terminal rename`, `orca worktree ps` (agents and status, chat tabs included), `orca chat rename` and `orca worktree activate`; with the Workspace Board sync on, also `orca worktree list` and `orca worktree set --workspace-status`. With that sync on, the worker also reads the workspace statuses' ids and names from Orca's profile database, read-only, because no command returns them. The plugin API alone sees only the focused workspace and cannot open or rename tabs. |
 | `storage:own` | Saves the board: columns, card positions, notes, agent status and monitors. All of it stays in the plugin's own folder. |
 | `agent:read` | Agent status icons, the yellow "not seen yet" mark, and moving a Backlog card when you start a chat. |
 | `workspace:read` | Knows which tab you are looking at, for the "not seen yet" mark and the open-chat highlight, and refreshes the board when chats open or close. |
@@ -177,6 +200,7 @@ The plugin makes no network requests and sends nothing anywhere. Some of what Or
 
 - `src/worker.ts` is a Node worker. It lists chats through the Orca CLI, tracks agent status and tool calls from Orca's events and hooks, and answers the panel.
 - `src/board.ts` holds the pure board logic: merging chats, moving cards, columns and the unseen mark. A chat that comes back with a new tab id, for example after an Orca restart, is matched back to its card by pty id, or by title and workspace.
+- `src/sync.ts` holds the rules of the Workspace Board sync, and `src/profile.ts` reads the status names from Orca's profile.
 - `src/monitor.ts` recognises loops and watchers from tool calls and decides when one has lost its signal.
 - `panel/` is the HTML panel. It uses native drag & drop, and holds the strings (`i18n.ts`), status icons (`icons.ts`) and agent logos (`logos.ts`).
 

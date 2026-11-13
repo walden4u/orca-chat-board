@@ -65,6 +65,8 @@ export type BoardView = {
   error: string | null
   /** Columns are Orca's workspace statuses: they cannot be added here, and a move sets the workspace's status. */
   synced: boolean
+  /** Synced, and the column titles are Orca's own status names: renamed in Orca, not here. */
+  orcaNames: boolean
 }
 
 /** A loop, schedule or background watcher an agent left running (seen through its tool calls). */

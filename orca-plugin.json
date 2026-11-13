@@ -68,6 +68,13 @@
         "default": false
       },
       {
+        "key": "autoCheck",
+        "title": "Check Orca automatically",
+        "description": "While the panel is on screen, asks Orca every 3 seconds which chat is open, and with the Workspace Board sync on what changed on Orca's board. Each check starts the orca CLI once. Turned off, the board updates when you click ⟳, when you open the panel and when a chat opens or closes; agent status icons stay live.",
+        "type": "boolean",
+        "default": true
+      },
+      {
         "key": "showAgent",
         "title": "Show agent logo",
         "description": "Claude / Cursor logo (or agent name) on each card.",

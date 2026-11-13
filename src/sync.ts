@@ -15,26 +15,42 @@ export const DEFAULT_STATUSES: readonly Column[] = [
  * The columns of a synced board: the ones it already has (their order, title and collapse are
  * yours), then any built-in status and any status in use that is missing. Orca does not tell
  * plugins the names of custom statuses, so those start titled by their id.
+ *
+ * `statuses` is Orca's own list, when it could be read from the profile: then the titles are
+ * Orca's, a status added there shows up at once, and one removed there (and no longer used) goes.
  */
-export function syncColumns(prev: Column[], inUse: Iterable<string>): Column[] {
-  const out = prev.map((c) => ({ ...c }))
+export function syncColumns(prev: Column[], inUse: Iterable<string>, statuses?: readonly Column[] | null): Column[] {
+  const used = [...inUse].filter(Boolean)
+  const names = statuses?.length ? new Map(statuses.map((s) => [s.id, s.title])) : null
+  const out = prev
+    .filter((c) => !names || names.has(c.id) || used.includes(c.id))
+    .map((c) => ({ ...c, title: names?.get(c.id) ?? c.title }))
   const have = new Set(out.map((c) => c.id))
   const add = (col: Column) => {
     if (have.has(col.id)) return
     have.add(col.id)
-    out.push({ ...col })
+    out.push({ id: col.id, title: col.title })
   }
-  DEFAULT_STATUSES.forEach(add)
-  for (const id of inUse) if (id) add({ id, title: id })
+  ;(statuses?.length ? statuses : DEFAULT_STATUSES).forEach(add)
+  for (const id of used) add({ id, title: id })
   return out
 }
 
-/** The columns the panel may save while synced: reorder, rename and collapse, never add; a status still needed comes back. */
-export function editSyncedColumns(current: Column[], requested: Column[], inUse: Iterable<string>): Column[] {
+/**
+ * The columns the panel may save while synced: reorder, rename and collapse, never add; a status
+ * still needed comes back. With Orca's own list (`statuses`) the titles stay Orca's.
+ */
+export function editSyncedColumns(
+  current: Column[],
+  requested: Column[],
+  inUse: Iterable<string>,
+  statuses?: readonly Column[] | null
+): Column[] {
   const known = new Set(current.map((c) => c.id))
   return syncColumns(
     requested.filter((c, i, all) => known.has(c.id) && all.findIndex((x) => x.id === c.id) === i),
-    inUse
+    inUse,
+    statuses
   )
 }
 
@@ -43,8 +59,12 @@ export function editSyncedColumns(current: Column[], requested: Column[], inUse:
  * Open chats move to the end of their workspace's column; cards whose column is gone go to the
  * first one. Answers `prev` itself when nothing changes.
  */
-export function applyWorkspaceStatuses(prev: BoardState, statusOf: ReadonlyMap<string, string>): BoardState {
-  const columns = syncColumns(prev.synced ? prev.columns : [], statusOf.values())
+export function applyWorkspaceStatuses(
+  prev: BoardState,
+  statusOf: ReadonlyMap<string, string>,
+  statuses?: readonly Column[] | null
+): BoardState {
+  const columns = syncColumns(prev.synced ? prev.columns : [], statusOf.values(), statuses)
   const ids = new Set(columns.map((c) => c.id))
   const first = columns[0]!.id
   const next = new Map<string, number>()

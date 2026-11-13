@@ -55,6 +55,8 @@ let pendingRender = false
 
 /** What each card shows; mirrors the plugin's settings (Settings → Plugins → Chat Board). */
 const show = { agent: true, workspace: true, status: true, time: true, notes: true, preview: true }
+/** The "Check Orca automatically" setting: off means the board asks Orca only on ⟳, on opening and on Orca's events. */
+let autoCheck = true
 
 async function loadSettings(): Promise<void> {
   try {
@@ -65,6 +67,7 @@ async function loadSettings(): Promise<void> {
     show.time = s.showTime !== false
     show.notes = s.showNotes !== false
     show.preview = s.showPreview !== false
+    autoCheck = s.autoCheck !== false
     setLanguage(s.language)
   } catch {
     // Settings unavailable (older approval): keep everything visible.
@@ -456,10 +459,14 @@ function renderColumn(col: Column, i: number, columns: Column[], cards: CardView
     setTimeout(() => (input.focus(), input.select()))
     head.append(input)
   } else {
-    const title = el('span', { class: 'column-title', title: t.renameHint }, col.title)
-    title.ondblclick = () => {
-      renamingColumn = col.id
-      render(true)
+    // Orca's own status names: they are renamed on Orca's Workspace Board.
+    const locked = view?.orcaNames === true
+    const title = el('span', { class: 'column-title', title: locked ? t.renameInOrca : t.renameHint }, col.title)
+    if (!locked) {
+      title.ondblclick = () => {
+        renamingColumn = col.id
+        render(true)
+      }
     }
     const collapse = el('button', { class: 'ghost', title: t.collapse, 'aria-label': t.collapse }, '⇤')
     collapse.onclick = () => setCollapsed(col, columns, true)
@@ -640,10 +647,16 @@ function boot(): void {
   })
   // Orca has no event for switching tabs: while the panel is on screen, ask every few seconds which
   // chat is open (open-chat highlight) and whether an unseen chat was opened. Redraw only on change.
+  // While synced the same check brings what changed on Orca's board: a card's column, a status's name.
   const liveKey = (v: BoardView | null) =>
-    (v?.cards ?? []).map((c) => `${c.key}:${c.active ? 1 : 0}:${c.unseenAt ? 1 : 0}`).sort().join('|')
+    JSON.stringify([
+      (v?.cards ?? []).map((c) => `${c.key}:${c.active ? 1 : 0}:${c.unseenAt ? 1 : 0}:${c.column}`).sort(),
+      (v?.columns ?? []).map((c) => [c.id, c.title]),
+      v?.orcaNames === true
+    ])
   setInterval(() => {
-    if (document.visibilityState !== 'visible' || !view) return
+    // Each check starts the orca CLI once, so it can be turned off; ⟳ then does it on demand.
+    if (!autoCheck || document.visibilityState !== 'visible' || !view) return
     void orca.plugin.request('seen.check', {}).then(
       (v) => {
         if (liveKey(v as BoardView) !== liveKey(view)) setView(v as BoardView)

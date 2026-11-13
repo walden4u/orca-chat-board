@@ -4,7 +4,8 @@ import * as main from './worker.ts'
 import { setOrcaRunner } from './cli.ts'
 import { emptyBoard, mergeChats, type LiveTerminal } from './board.ts'
 import { applyWorkspaceStatuses, editSyncedColumns, moveWorkspaceCards, syncColumns } from './sync.ts'
-import type { BoardView } from './protocol.ts'
+import { activeProfileOf, setStatusNamesReader, statusesOf, userDataDir } from './profile.ts'
+import type { BoardView, Column } from './protocol.ts'
 
 function term(n: number, worktree: string): LiveTerminal {
   return {
@@ -22,7 +23,74 @@ function term(n: number, worktree: string): LiveTerminal {
 const ids = (cols: { id: string }[]) => cols.map((c) => c.id)
 const columnsOf = (v: BoardView) => Object.fromEntries(v.cards.map((c) => [c.key, c.column]))
 
-afterEach(() => setOrcaRunner(null))
+// Never this machine's own Orca profile: unreadable unless a test says what it holds.
+const noProfile = () => setStatusNamesReader(async () => Promise.reject(new Error('no profile in tests')))
+noProfile()
+
+afterEach(() => {
+  setOrcaRunner(null)
+  noProfile()
+})
+
+const ORCA: Column[] = [
+  { id: 'status-5', title: 'Always' },
+  { id: 'todo', title: 'Todo' },
+  { id: 'in-progress', title: 'Doing' },
+  { id: 'completed', title: 'Done' }
+]
+
+test("with Orca's own list: its names win, new statuses appear, removed ones go, your order stays", () => {
+  assert.deepEqual(syncColumns([], [], ORCA), ORCA)
+  const mine = [
+    { id: 'completed', title: 'Finished', collapsed: true },
+    { id: 'in-review', title: 'In review' },
+    { id: 'status-9', title: 'Old' },
+    { id: 'status-5', title: 'status-5' }
+  ]
+  const next = syncColumns(mine, ['status-9'], ORCA)
+  // in-review was removed in Orca; status-9 was too, but a workspace still has it.
+  assert.deepEqual(ids(next), ['completed', 'status-9', 'status-5', 'todo', 'in-progress'])
+  assert.deepEqual(next[0], { id: 'completed', title: 'Done', collapsed: true })
+  assert.deepEqual([next[1]!.title, next[2]!.title, next[4]!.title], ['Old', 'Always', 'Doing'])
+  // A rename from the panel does not stick; a reorder does.
+  const edited = editSyncedColumns(next, [{ ...next[2]!, title: 'Mine' }, ...next.filter((_, i) => i !== 2)], ['status-9'], ORCA)
+  assert.deepEqual(ids(edited), ['status-5', 'completed', 'status-9', 'todo', 'in-progress'])
+  assert.equal(edited[0]!.title, 'Always')
+  // An empty list is "unknown", not "Orca has no statuses".
+  assert.deepEqual(ids(syncColumns(mine, [], [])), ['completed', 'in-review', 'status-9', 'status-5', 'todo', 'in-progress'])
+})
+
+test("Orca's profile: statuses, active profile and data folder", () => {
+  const ui = JSON.stringify({
+    theme: 'dark',
+    workspaceStatuses: [
+      { id: 'status-5', label: ' Always ', color: 'amber', icon: 'circle-dot' },
+      { id: 'todo', label: 'Todo' },
+      { id: 'todo', label: 'Twice' },
+      { id: 'status-6', label: '' },
+      { label: 'No id' },
+      null
+    ]
+  })
+  assert.deepEqual(statusesOf(ui), [
+    { id: 'status-5', title: 'Always' },
+    { id: 'todo', title: 'Todo' },
+    { id: 'status-6', title: 'status-6' }
+  ])
+  for (const bad of ['', 'null', '{}', '{"workspaceStatuses":[]}', '{"workspaceStatuses":"x"}']) assert.equal(statusesOf(bad), null)
+
+  assert.equal(activeProfileOf('{"activeProfileId":"local-default"}'), 'local-default')
+  for (const bad of ['', '{}', '{"activeProfileId":"../x"}', '{"activeProfileId":".."}', '{"activeProfileId":7}']) {
+    assert.equal(activeProfileOf(bad), null)
+  }
+
+  assert.equal(userDataDir({ platform: 'win32', env: { USERPROFILE: 'C:\\Users\\me' } }), 'C:\\Users\\me\\AppData\\Roaming\\orca')
+  assert.equal(userDataDir({ platform: 'win32', env: { AppData: 'D:\\Roam', USERPROFILE: 'C:\\Users\\me' } }), 'D:\\Roam\\orca')
+  assert.equal(userDataDir({ platform: 'darwin', env: { HOME: '/Users/me' } }), '/Users/me/Library/Application Support/orca')
+  assert.equal(userDataDir({ platform: 'linux', env: { HOME: '/home/me' } }), '/home/me/.config/orca')
+  assert.equal(userDataDir({ platform: 'linux', env: { HOME: '/home/me', XDG_CONFIG_HOME: '/cfg' } }), '/cfg/orca')
+  assert.equal(userDataDir({ platform: 'linux', env: {} }), null)
+})
 
 test('synced columns: built-in statuses, then custom ones in use; yours are kept', () => {
   assert.deepEqual(ids(syncColumns([], ['in-progress', 'status-5'])), ['todo', 'in-progress', 'in-review', 'completed', 'status-5'])
@@ -126,6 +194,38 @@ test('worker: both directions', async () => {
   v = (await worker.request('board.columns.set', { columns: [...v.columns, { id: 'col-x', title: 'X' }] })) as BoardView
   assert.equal(v.columns.some((c) => c.id === 'col-x'), false)
   assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test("worker: column names follow Orca's status names, and come back to you when they cannot be read", async () => {
+  let names: Column[] | null = [...ORCA]
+  setStatusNamesReader(async () => names ?? Promise.reject(new Error('locked')))
+  fakeOrca([term(1, 'a')], { a: 'status-5' }, [])
+  const worker = await mountWorker(main, { host: host(true) })
+  const titles = (v: BoardView) => Object.fromEntries(v.columns.map((c) => [c.id, c.title]))
+
+  let v = (await worker.request('board.get', { refresh: true })) as BoardView
+  assert.equal(v.orcaNames, true)
+  assert.deepEqual(v.columns, ORCA)
+  assert.deepEqual(columnsOf(v), { tab1: 'status-5' })
+
+  // Renamed in Orca: the column follows at the next refresh.
+  names = ORCA.map((c) => (c.id === 'status-5' ? { ...c, title: 'Ongoing' } : c))
+  v = (await worker.request('board.get', { refresh: true })) as BoardView
+  assert.equal(titles(v)['status-5'], 'Ongoing')
+
+  // Renamed here: refused, the name is Orca's.
+  v = (await worker.request('board.columns.set', { columns: v.columns.map((c) => ({ ...c, title: `${c.title}!` })) })) as BoardView
+  assert.equal(titles(v)['status-5'], 'Ongoing')
+
+  // The profile cannot be read: the last names stay, and the panel may rename again.
+  names = null
+  v = (await worker.request('board.get', { refresh: true })) as BoardView
+  assert.equal(v.orcaNames, false)
+  assert.equal(titles(v)['status-5'], 'Ongoing')
+  v = (await worker.request('board.columns.set', { columns: v.columns.map((c) => (c.id === 'status-5' ? { ...c, title: 'Mine' } : c)) })) as BoardView
+  assert.equal(titles(v)['status-5'], 'Mine')
+  assert.equal(worker.logs.some((l) => String(l).includes('status names not read')), true)
   await worker.deactivate()
 })
 
