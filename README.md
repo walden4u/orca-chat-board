@@ -1,5 +1,7 @@
 # Chat Board for Orca
 
+**English** | [한국어](README.ko.md)
+
 A kanban of your **agent chats**: the Claude, Codex, Cursor, Gemini and other agent tabs you have open, terminal or chat, across every Orca workspace. Orca's Workspace Board groups work by workspace. Chat Board groups it by conversation, which helps when you keep many chats on different topics open in the same workspace.
 
 ![Chat Board in dark theme](assets/screenshot-dark.png)
