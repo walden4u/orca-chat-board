@@ -194,6 +194,27 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .preview-you .preview-text { color: var(--orca-muted-foreground); max-height: 8.7em; overflow: hidden; }
 .preview-empty { color: var(--orca-muted-foreground); font-style: italic; }
 
+.reply-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; padding: 8px;
+  background: color-mix(in srgb, var(--orca-background) 70%, transparent); }
+.reply { flex: 1; min-width: 0; max-width: 760px; margin: 0 auto; display: flex; flex-direction: column;
+  background: var(--orca-popover); color: var(--orca-popover-foreground);
+  border: 1px solid var(--orca-border); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+.reply-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; flex: none;
+  border-bottom: 1px solid var(--orca-border); }
+.reply-title { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px;
+  user-select: text; }
+.reply-body > * { flex: none; }
+.reply .preview-text { max-height: none; overflow: visible; }
+.reply-foot { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px;
+  border-top: 1px solid var(--orca-border); }
+.reply-hint { color: var(--orca-muted-foreground); }
+.reply-input { resize: vertical; min-height: 4.4em; max-height: 40vh; line-height: 1.45; }
+.reply-row { display: flex; align-items: center; gap: 8px; }
+.reply-status { flex: 1; min-width: 0; color: var(--orca-destructive); word-break: break-word; }
+.reply-row .primary { padding: 3px 14px; }
+.reply-row .primary:disabled { opacity: .5; cursor: default; }
+
 details.archive { border-top: 1px solid var(--orca-border); padding: 6px 8px; flex: none; max-height: 40%; overflow: auto; }
 details.archive summary { cursor: pointer; color: var(--orca-muted-foreground); display: flex; align-items: center; gap: 6px; }
 details.archive summary { list-style: none; }

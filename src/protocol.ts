@@ -110,6 +110,11 @@ declare module 'orca' {
     'sync.set': { input: { on: boolean }; output: BoardView }
     /** Shows the chat's terminal tab in Orca. */
     'chat.focus': { input: { key: string }; output: { ok: boolean; error: 'closed' | string | null } }
+    /**
+     * Sends `text` to the chat as your next prompt (typed into its terminal, then Enter). Only when
+     * you press Send in the reply box. `chat-tab`: Orca has no way to send to its chat tabs.
+     */
+    'chat.send': { input: { key: string; text: string }; output: { ok: boolean; error: 'closed' | 'chat-tab' | 'empty' | string | null } }
   }
   interface PluginPanelEvents {
     'board.changed': BoardView

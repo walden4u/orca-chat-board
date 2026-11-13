@@ -472,6 +472,40 @@ test('hover preview answers the last prompt and reply from Orca, on demand', asy
   await worker.deactivate()
 })
 
+test('the reply box sends your text to the chat as one argument, and to nothing else', async () => {
+  const calls: string[][] = []
+  let live = [term(1), term(2)]
+  setOrcaRunner(async (args) => {
+    calls.push(args)
+    if (args[0] === 'terminal' && args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: live, visualLayouts: [] } })
+    if (args[0] === 'terminal' && args[1] === 'send') return JSON.stringify({ ok: true, result: { send: { accepted: true } } })
+    if (args[0] === 'worktree' && args[1] === 'ps') {
+      const agents = [
+        { paneKey: 'structured-agent-session-s1:leaf', parentPaneKey: null, state: 'done', agentType: 'claude', conversationName: 'A chat tab', hasLivePty: null }
+      ]
+      return JSON.stringify({ ok: true, result: { worktrees: [{ worktreeId: WT, path: '/Users/me/toolbox', agents }] } })
+    }
+    throw new Error(`unexpected ${args.join(' ')}`)
+  })
+  const worker = await mountWorker(main, { host: host() })
+  const view = (await worker.request('board.get', { refresh: true })) as BoardView
+  const sends = () => calls.filter((c) => c[1] === 'send')
+
+  // A text that starts like an option stays text; surrounding blank space goes.
+  assert.deepEqual(await worker.request('chat.send', { key: 'tab2', text: '  --help\nplease  ' }), { ok: true, error: null })
+  assert.deepEqual(sends(), [['terminal', 'send', '--terminal', 'term_2', '--text=--help\nplease', '--enter', '--json']])
+
+  assert.deepEqual(await worker.request('chat.send', { key: 'tab1', text: ' \n ' }), { ok: false, error: 'empty' })
+  // Orca's chat tabs cannot be sent to.
+  const chatTab = view.cards.find((c) => c.sessionId)!
+  assert.deepEqual(await worker.request('chat.send', { key: chatTab.key, text: 'hi' }), { ok: false, error: 'chat-tab' })
+  // A chat that closed since the board was drawn gets nothing.
+  live = [term(2)]
+  assert.deepEqual(await worker.request('chat.send', { key: 'tab1', text: 'hi' }), { ok: false, error: 'closed' })
+  assert.equal(sends().length, 1)
+  await worker.deactivate()
+})
+
 test("Orca's monitoring mode (working overall, main turn done) reaches the card", async () => {
   fakeCli(() => [term(1)])
   const worker = await mountWorker(main, { host: host() })

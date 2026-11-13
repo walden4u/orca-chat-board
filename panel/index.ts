@@ -7,6 +7,7 @@ import { STATUS_ICON, type StatusKind } from './icons.ts'
 import { locale, setLanguage, t } from './i18n.ts'
 import { isStale } from '../src/monitor.ts'
 import { hidePreview, schedulePreview } from './preview.ts'
+import { openReply } from './reply.ts'
 
 const INTERRUPTED = new Set(['interruption', 'failure', 'cancellation'])
 
@@ -175,14 +176,13 @@ function setView(next: BoardView | null): void {
 
 const isEditing = () => {
   const a = document.activeElement
-  return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && !a.classList.contains('search')
+  return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && !a.classList.contains('search') && !a.closest('.reply')
 }
 
 // ---------- actions ----------
 
 async function load(refresh: boolean): Promise<void> {
-  setView(await request<BoardView>('board.get', { refresh, locale }))
-}
+  setView(await request<BoardView>('board.get', { refresh, locale }))}
 
 async function focusChat(c: CardView): Promise<void> {
   if (c.closed) return
@@ -259,7 +259,16 @@ function renderCard(c: CardView): HTMLElement {
   if (!c.closed) {
     const open = el('button', { class: 'ghost', title: t.openChat }, '↗')
     open.onclick = (e) => (e.stopPropagation(), void focusChat(c))
-    actions.append(open)
+    const reply = el('button', { class: 'ghost', title: t.reply, 'aria-label': t.reply }, '↩')
+    reply.onclick = (e) => {
+      e.stopPropagation()
+      hidePreview()
+      openReply(
+        { key: c.key, title: titleOf(c), workspace: c.worktreeName, chatTab: !!c.sessionId, working: kind === 'working' },
+        (title) => showFlash(t.sent(title))
+      )
+    }
+    actions.append(open, reply)
   }
   const edit = el('button', { class: 'ghost', title: t.editCard }, '✎')
   edit.onclick = (e) => {

@@ -67,6 +67,7 @@ Every agent tab you have open, in any workspace, is one card. With the default s
 | Move a chat | Drag its card to another column, or up and down within a column. |
 | Rename a chat or add a note | Click ✎ on the card. Enter saves, Shift+Enter starts a new line in the note. |
 | See what a chat was about | Hover its card for a moment. You get your last message and the agent's last reply. |
+| Read the whole reply and answer it | Click ↩ on the card. Type your message and press Enter (Shift+Enter starts a new line). |
 | Find a chat | Type in the filter box. It matches title, note, workspace and agent. |
 | Update the board now | Click ⟳. |
 | Clean up closed chats | They sit in **Archived**. Remove one with ✕ or all with **Clear**. |
@@ -123,6 +124,7 @@ This is not an Orca interface, so an Orca update can change it. When the read fa
 **Working with chats**
 - Hover a card for a moment to see your last message and the agent's last reply.
 - Click a card to open its chat. Dragging moves the card instead.
+- ↩ opens the reply box: your last message and the agent's whole last reply, with a field to answer. Send types your text into that chat's terminal as your next prompt, without leaving the board. What you typed and did not send is kept for that chat until the panel reloads. Orca's chat tabs can be read there but not answered, because Orca has no command to send to them.
 - ✎ renames the chat's Orca tab and edits the card's note. Enter saves; Shift+Enter adds a new line to the note.
 - When you start talking to a chat in **Backlog**, its card moves to **In progress**. You can turn this off.
 - A chat you close goes to **Archived** and keeps its column and note. Remove one card with ✕, or all of them with **Clear**.
@@ -178,14 +180,14 @@ Orca asks you to approve these when you install the plugin. Here is what each on
 
 | Permission | What the plugin does with it |
 |---|---|
-| **Runs its own code** (Node worker) | Lists your chats in every workspace, opens a chat and renames its tab. The worker only ever runs these Orca CLI commands: `orca terminal list`, `orca terminal switch`, `orca terminal rename`, `orca worktree ps` (agents and status, chat tabs included), `orca chat rename` and `orca worktree activate`; with the Workspace Board sync on, also `orca worktree list` and `orca worktree set --workspace-status`. With that sync on, the worker also reads the workspace statuses' ids and names from Orca's profile database, read-only, because no command returns them. The plugin API alone sees only the focused workspace and cannot open or rename tabs. |
+| **Runs its own code** (Node worker) | Lists your chats in every workspace, opens a chat and renames its tab. The worker only ever runs these Orca CLI commands: `orca terminal list`, `orca terminal switch`, `orca terminal rename`, `orca worktree ps` (agents and status, chat tabs included), `orca chat rename` and `orca worktree activate`; when you press Send in a card's reply box, `orca terminal send`, with the text you typed, to that one chat; with the Workspace Board sync on, also `orca worktree list` and `orca worktree set --workspace-status`. With that sync on, the worker also reads the workspace statuses' ids and names from Orca's profile database, read-only, because no command returns them. The plugin API alone sees only the focused workspace and cannot open or rename tabs. |
 | `storage:own` | Saves the board: columns, card positions, notes, agent status and monitors. All of it stays in the plugin's own folder. |
 | `agent:read` | Agent status icons, the yellow "not seen yet" mark, and moving a Backlog card when you start a chat. |
 | `workspace:read` | Knows which tab you are looking at, for the "not seen yet" mark and the open-chat highlight, and refreshes the board when chats open or close. |
 | `settings:own` | The plugin's options in Orca's Settings. |
 | Hook `agent.tool.after` (observe only) | Detects loops and watchers. Orca hands this hook every tool call an agent makes. The plugin looks only at `ScheduleWakeup`, `CronCreate`/`CronDelete`, `Monitor` and `TaskStop`, keeping their timing and description, and drops every other call without storing it. The hook never blocks or changes a call. |
 
-The plugin makes no network requests and sends nothing anywhere. Some of what Orca's CLI returns, such as a preview of each terminal's latest output and the agent's last message, prompt or tool input, is never stored or shown by the plugin; it keeps only titles, agent type and status. The hover preview reads your last prompt and the agent's last reply from Orca when you hover a card, shows them, and keeps them for a few seconds in memory only.
+The plugin makes no network requests and sends nothing anywhere. Some of what Orca's CLI returns, such as a preview of each terminal's latest output and the agent's last message, prompt or tool input, is never stored or shown by the plugin; it keeps only titles, agent type and status. The hover preview reads your last prompt and the agent's last reply from Orca when you hover a card, shows them, and keeps them for a few seconds in memory only. The reply box reads the same two texts when you open it. The plugin sends input to an agent only when you press Send there, and only the text you typed.
 
 ## Limitations
 
@@ -202,7 +204,7 @@ The plugin makes no network requests and sends nothing anywhere. Some of what Or
 - `src/board.ts` holds the pure board logic: merging chats, moving cards, columns and the unseen mark. A chat that comes back with a new tab id, for example after an Orca restart, is matched back to its card by pty id, or by title and workspace.
 - `src/sync.ts` holds the rules of the Workspace Board sync, and `src/profile.ts` reads the status names from Orca's profile.
 - `src/monitor.ts` recognises loops and watchers from tool calls and decides when one has lost its signal.
-- `panel/` is the HTML panel. It uses native drag & drop, and holds the strings (`i18n.ts`), status icons (`icons.ts`) and agent logos (`logos.ts`).
+- `panel/` is the HTML panel. It uses native drag & drop, and holds the strings (`i18n.ts`), status icons (`icons.ts`), agent logos (`logos.ts`), the hover preview (`preview.ts`) and the reply box (`reply.ts`).
 
 ## Development
 

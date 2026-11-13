@@ -24,7 +24,7 @@ let currentKey: string | null = null
 let hover = 0
 
 /** Plain text from the agent's markdown: drops emphasis markers and code fences, keeps line breaks. */
-function plain(text: string): string {
+export function plain(text: string): string {
   return text
     .replace(/```[a-z]*\n?/gi, '')
     .replace(/\*\*|__|`/g, '')
@@ -35,9 +35,10 @@ function plain(text: string): string {
 
 const head = (s: string, n: number) => (s.length > n ? s.slice(0, n).trimEnd() + '…' : s)
 
-async function load(key: string): Promise<Preview> {
+/** Your last prompt and the agent's last reply, from Orca; `fresh` skips the few seconds of cache. */
+export async function loadPreview(key: string, fresh = false): Promise<Preview> {
   const hit = cache.get(key)
-  if (hit && Date.now() - hit.at < CACHE_MS) return hit.data
+  if (!fresh && hit && Date.now() - hit.at < CACHE_MS) return hit.data
   const data = (await orca.plugin.request('chat.preview' as never, { key } as never)) as Preview
   cache.set(key, { at: Date.now(), data })
   return data
@@ -124,7 +125,7 @@ export function schedulePreview(key: string, anchor: HTMLElement): void {
     timer = null
     let data: Preview
     try {
-      data = await load(key)
+      data = await loadPreview(key)
     } catch {
       return
     }

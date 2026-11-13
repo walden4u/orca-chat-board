@@ -25,6 +25,7 @@ import {
   listWorkspaceStatuses,
   renameChat,
   renameTerminal,
+  sendToTerminal,
   setWorkspaceStatus,
   switchTerminal,
   type PsWorktree
@@ -38,6 +39,8 @@ const STATUS_KEY = 'status'
 const MONITORS_KEY = 'monitors'
 /** While synced, light refreshes re-read the workspace statuses at most this often. */
 const STATUS_POLL_MS = 10_000
+/** A prompt sent from the reply box travels as one command-line argument. */
+const MAX_PROMPT_CHARS = 8000
 
 type Status = { state: AgentState; at: number; outcome?: string | null; main?: AgentState | null }
 
@@ -354,6 +357,26 @@ export default function activate(orca: OrcaWorkerApi): void {
       orca.log(`preview failed: ${(err as Error).message.split('\n')[0]}`)
     }
     return none
+  })
+
+  // Reply box: what you typed goes to that chat's terminal as your prompt. Nothing else ever sends input.
+  orca.panels.handle('chat.send', async ({ key, text }) => {
+    const prompt = typeof text === 'string' ? text.trim().slice(0, MAX_PROMPT_CHARS) : ''
+    if (!prompt) return { ok: false, error: 'empty' }
+    // Always from a fresh listing: a handle from an old one could be another chat's terminal by now.
+    await serial(refresh)
+    const handle = handles[key]
+    const card = (await loadBoard()).cards[key]
+    if (!handle || !card || card.closed) return { ok: false, error: 'closed' }
+    if (card.sessionId) return { ok: false, error: 'chat-tab' }
+    try {
+      await sendToTerminal(handle, prompt)
+      return { ok: true, error: null }
+    } catch (err) {
+      const reason = (err as Error).message.split('\n').pop() ?? ''
+      orca.log(`send failed: ${reason}`)
+      return { ok: false, error: reason }
+    }
   })
 
   orca.panels.handle('chat.focus', async ({ key }) => {
