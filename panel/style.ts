@@ -179,7 +179,7 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
   position: fixed; z-index: 50; padding: 8px 10px; display: flex; flex-direction: column; gap: 8px;
   background: var(--orca-popover); color: var(--orca-popover-foreground);
   border: 1px solid var(--orca-border); border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .35); pointer-events: none; font-size: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .35); pointer-events: none; font-size: 12px; overflow: hidden;
   opacity: 0; transform: translateY(-4px) scale(.98); transform-origin: top left;
   transition: opacity .14s ease-out, transform .16s cubic-bezier(.2, .8, .2, 1);
 }
@@ -188,8 +188,10 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .preview-who { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
   color: var(--orca-muted-foreground); margin-bottom: 2px; }
 .preview-agent .preview-who { color: #d97757; }
-.preview-text { white-space: pre-wrap; word-break: break-word; line-height: 1.45; max-height: 11em; overflow: hidden; }
-.preview-you .preview-text { color: var(--orca-muted-foreground); }
+.preview > * { flex: none; }
+.preview.clipped { -webkit-mask-image: linear-gradient(#000 calc(100% - 32px), transparent); mask-image: linear-gradient(#000 calc(100% - 32px), transparent); }
+.preview-text { white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+.preview-you .preview-text { color: var(--orca-muted-foreground); max-height: 8.7em; overflow: hidden; }
 .preview-empty { color: var(--orca-muted-foreground); font-style: italic; }
 
 details.archive { border-top: 1px solid var(--orca-border); padding: 6px 8px; flex: none; max-height: 40%; overflow: auto; }

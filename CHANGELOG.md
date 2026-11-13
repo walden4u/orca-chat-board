@@ -6,6 +6,8 @@
 - **Synced column names follow Orca:** rename, add or remove a status on Orca's Workspace Board and the columns follow. Orca has no command for the status names, so the worker reads them from Orca's profile database, read-only. If that fails, the board keeps its names and lets you rename columns as before.
 - **Check Orca automatically** (on by default): turn it off to stop the check that runs every 3 seconds while the panel is on screen, and update with ⟳ instead.
 - **Synced boards update by themselves:** a change made on Orca's board (a workspace moved, a status renamed) was read but not drawn until something else changed.
+- **Filter:** text typed through an IME (Korean, Japanese, Chinese) arrived as loose letters, because the filter box was replaced on every keystroke.
+- **Bigger hover preview:** as wide as the panel and as tall as the room above or below the card, with the reply shown from its start.
 - **Hover preview:** a second popover could stay on screen when the board was redrawn under the pointer.
 - **Windows:** the board listed nothing because Orca starts plugin workers without `APPDATA`, which `orca.exe` needs. The worker now passes it. A failing CLI call also shows the CLI's own reason.
 

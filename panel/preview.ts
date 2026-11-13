@@ -9,6 +9,11 @@ const DELAY_MS = 400
 const WARM_DELAY_MS = 90
 const WARM_WINDOW_MS = 600
 const FADE_MS = 140
+const MAX_WIDTH = 640
+const MIN_HEIGHT = 120
+/** How much of your prompt and of the agent's reply is put in the popover; the popover's height clips the rest. */
+const PROMPT_CHARS = 600
+const REPLY_CHARS = 6000
 let lastShownAt = 0
 const CACHE_MS = 5000
 const cache = new Map<string, { at: number; data: Preview }>()
@@ -29,7 +34,6 @@ function plain(text: string): string {
 }
 
 const head = (s: string, n: number) => (s.length > n ? s.slice(0, n).trimEnd() + '…' : s)
-const tail = (s: string, n: number) => (s.length > n ? '…' + s.slice(s.length - n).trimStart() : s)
 
 async function load(key: string): Promise<Preview> {
   const hit = cache.get(key)
@@ -41,12 +45,22 @@ async function load(key: string): Promise<Preview> {
 
 function place(el: HTMLElement, anchor: Element): void {
   const r = anchor.getBoundingClientRect()
-  const w = Math.min(380, window.innerWidth - 16)
+  const edge = 8
+  const gap = 6
+  // As wide as the panel allows, and as tall as the larger side of the card (below it, or above).
+  const w = Math.min(MAX_WIDTH, window.innerWidth - edge * 2)
   el.style.width = `${w}px`
-  el.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`
-  const below = r.bottom + 6
+  el.style.left = `${Math.max(edge, Math.min(r.left, window.innerWidth - w - edge))}px`
+  el.style.maxHeight = ''
   const h = el.offsetHeight
-  el.style.top = `${below + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : below}px`
+  const roomBelow = window.innerHeight - r.bottom - gap - edge
+  const roomAbove = r.top - gap - edge
+  const below = h <= roomBelow || roomBelow >= roomAbove
+  const room = Math.max(MIN_HEIGHT, below ? roomBelow : roomAbove)
+  el.style.maxHeight = `${room}px`
+  el.style.top = `${below ? r.bottom + gap : Math.max(edge, r.top - gap - Math.min(h, room))}px`
+  // Longer than the room: the end fades out instead of stopping mid-line.
+  el.classList.toggle('clipped', h > room)
 }
 
 function render(data: Preview): HTMLDivElement {
@@ -71,8 +85,9 @@ function render(data: Preview): HTMLDivElement {
     empty.textContent = t.previewEmpty
     box.append(empty)
   }
-  if (data.prompt) box.append(section(t.previewYou, head(plain(data.prompt), 220), 'you'))
-  if (data.message) box.append(section(t.previewAgent, tail(plain(data.message), 520), 'agent'))
+  if (data.prompt) box.append(section(t.previewYou, head(plain(data.prompt), PROMPT_CHARS), 'you'))
+  // The reply from its start: that is where an agent puts what it found or did.
+  if (data.message) box.append(section(t.previewAgent, head(plain(data.message), REPLY_CHARS), 'agent'))
   return box
 }
 
