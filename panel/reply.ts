@@ -37,6 +37,14 @@ const DOUBLE_CLICK_MS = 500
 
 /** What you typed and did not send, per chat, until the panel reloads. */
 const drafts = new Map<string, string>()
+/**
+ * What you last sent to a chat from here, until Orca's record of the chat catches up. Some sessions
+ * stop reporting to Orca (started before a restart, say): their record stays at an old exchange,
+ * and without this the box would look as if nothing had been sent.
+ */
+const sent = new Map<string, { text: string; at: number }>()
+
+const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 let current: { key: string; shut: () => void; setWaiting: (n: number) => void } | null = null
 
 /** The chat whose box is open, if any. */
@@ -158,6 +166,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     }
     busy = false
     if (result.ok) {
+      sent.set(target.key, { text, at: Date.now() })
       input.value = ''
       shutBox()
       handlers.onSent(target.title)
@@ -207,9 +216,25 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     (data) => {
       if (!open) return
       body.replaceChildren()
+      const when = data.at ? ` · ${clock(data.at)}` : ''
       if (data.prompt) body.append(section(t.previewYou, plain(data.prompt), 'you'))
-      if (data.message) body.append(section(t.previewAgent, plain(data.message), 'agent'))
-      if (!data.prompt && !data.message) body.append(node('div', 'preview-text preview-empty', t.previewEmpty))
+      if (data.message) body.append(section(t.previewAgent + when, plain(data.message), 'agent'))
+      if (!data.prompt && !data.message && !data.screen) body.append(node('div', 'preview-text preview-empty', t.previewEmpty))
+      // Orca's record is behind this chat's terminal: what is above is old, the screen is now.
+      if (data.screen) {
+        const now = node('div', 'reply-screen')
+        now.append(node('div', 'preview-who', t.replyScreen), node('div', 'reply-hint', t.replyScreenNote), node('pre', '', data.screen))
+        body.append(now)
+        sent.delete(target.key)
+        setTimeout(() => (body.scrollTop = body.scrollHeight), 0)
+        return
+      }
+      // Sent from here after Orca's last record of this chat: show it, and say the record is behind.
+      const mine = sent.get(target.key)
+      if (mine && (data.at ?? 0) < mine.at) {
+        body.append(section(`${t.previewYou} · ${clock(mine.at)}`, mine.text, 'you'), node('div', 'reply-hint', t.replySentNote))
+        body.scrollTop = body.scrollHeight
+      } else sent.delete(target.key)
     },
     () => {
       if (open) body.replaceChildren(node('div', 'preview-text preview-empty', t.previewEmpty))

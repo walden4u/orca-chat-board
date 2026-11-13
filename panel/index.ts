@@ -219,8 +219,12 @@ function waitingCards(except?: string | null): CardView[] {
     .sort((a, b) => (a.unseenAt ?? 0) - (b.unseenAt ?? 0))
 }
 
-/** You closed a box by hand: the ones behind it wait until another checked chat finishes. */
+/**
+ * You left a box for the chat itself (↗): the boxes behind it wait, so they do not cover what you
+ * went to do. They come back when another checked chat finishes, or after a while.
+ */
 let queueHeldAt = 0
+const QUEUE_HOLD_MS = 120_000
 
 function showReply(c: CardView, auto = false): void {
   hidePreview()
@@ -247,8 +251,9 @@ function showReply(c: CardView, auto = false): void {
         showFlash(t.sent(title))
         openNextWaiting(true)
       },
+      // Closing a box is done with that chat, not with the queue: the next one that waits opens.
       onNext: () => openNextWaiting(true),
-      onClosed: () => (queueHeldAt = Date.now()),
+      onClosed: () => openNextWaiting(true),
       onOpenChat: () => {
         queueHeldAt = Date.now()
         void focusChat(c)
@@ -260,7 +265,7 @@ function showReply(c: CardView, auto = false): void {
 /**
  * Opens the reply box of the checked chat that has waited longest. By itself (`asked` false) only
  * when nothing of yours is in the way: no box open, no edit or drag going on, the panel on screen,
- * and not right after you closed a box by hand.
+ * and not right after you left a box for the chat itself.
  */
 function openNextWaiting(asked = false): void {
   const open = replyKey()
@@ -272,7 +277,7 @@ function openNextWaiting(asked = false): void {
   if (!queue.length) return
   if (!asked) {
     if (editingCard || renamingColumn || dragKey || document.visibilityState !== 'visible') return
-    if (!queue.some((c) => (c.unseenAt ?? 0) > queueHeldAt)) return
+    if (Date.now() - queueHeldAt < QUEUE_HOLD_MS && !queue.some((c) => (c.unseenAt ?? 0) > queueHeldAt)) return
   }
   queueHeldAt = 0
   showReply(queue[0]!, !asked)
@@ -766,7 +771,10 @@ function boot(): void {
   // A checked chat may have finished while the panel was out of sight.
   document.addEventListener('visibilitychange', () => openNextWaiting())
   // Relative times ("5m") tick locally; this never calls Orca.
-  setInterval(() => render(), 30_000)
+  setInterval(() => {
+    render()
+    openNextWaiting() // boxes held back when you left for a chat come back after a while
+  }, 30_000)
 
   orca.settings.onDidChange(() => void loadSettings().then(() => render(true)))
 

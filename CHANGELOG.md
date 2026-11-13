@@ -8,6 +8,7 @@
 - **Synced boards update by themselves:** a change made on Orca's board (a workspace moved, a status renamed) was read but not drawn until something else changed.
 - **Reply box:** a click on a card now shows your last message and the agent's whole last reply, and lets you answer. A double-click, or ↗, opens the chat in Orca as a click did before. Send types your text into that chat's terminal (`orca terminal send`). Orca's chat tabs can be read but not answered.
 - **Checked chats open by themselves:** check a card and its reply box opens when its agent finishes; answering or pressing Next opens the next one that finished. The check mark stays on the card and unchecks with a click.
+- **Reply box on a chat Orca lost track of:** when Orca's record of a chat is behind its terminal, the box shows the terminal's screen as it is now under the old exchange, with the time of the record. What you sent from the box is shown until the record catches up.
 - **Korean UI:** the panel is in Korean when Orca is, or when you pick 한국어 under Language.
 - **Filter:** text typed through an IME (Korean, Japanese, Chinese) arrived as loose letters, because the filter box was replaced on every keystroke.
 - **Bigger hover preview:** as wide as the panel and as tall as the room above or below the card, with the reply shown from its start.

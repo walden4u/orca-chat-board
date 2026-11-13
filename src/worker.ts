@@ -23,6 +23,7 @@ import {
   listAgents,
   listTerminals,
   listWorkspaceStatuses,
+  readTerminalScreen,
   renameChat,
   renameTerminal,
   sendToTerminal,
@@ -41,6 +42,9 @@ const MONITORS_KEY = 'monitors'
 const STATUS_POLL_MS = 10_000
 /** A prompt sent from the reply box travels as one command-line argument. */
 const MAX_PROMPT_CHARS = 8000
+/** Terminal output this much newer than Orca's record of the chat: the record is behind. */
+const STALE_RECORD_MS = 120_000
+const MAX_SCREEN_CHARS = 20_000
 
 type Status = { state: AgentState; at: number; outcome?: string | null; main?: AgentState | null }
 
@@ -347,19 +351,31 @@ export default function activate(orca: OrcaWorkerApi): void {
   )
 
   // Hover preview: asked on demand, answered from Orca's agent record, kept nowhere.
-  orca.panels.handle('chat.preview', async ({ key }) => {
-    const none = { prompt: null, message: null, at: null }
+  orca.panels.handle('chat.preview', async ({ key, screen }) => {
+    const found = { prompt: null as string | null, message: null as string | null, at: null as number | null, screen: null as string | null }
     try {
-      for (const w of await listAgents()) {
+      // The reply box also asks for the terminals: their last output tells whether Orca's record is behind.
+      const [agents, live] = await Promise.all([listAgents(), screen ? listTerminals().catch(() => null) : null])
+      for (const w of agents) {
         for (const a of w.agents ?? []) {
           if (a.parentPaneKey || a.paneKey.split(':')[0] !== key) continue
-          return { prompt: a.prompt || null, message: a.lastAssistantMessage || null, at: a.updatedAt ?? null }
+          found.prompt = a.prompt || null
+          found.message = a.lastAssistantMessage || null
+          found.at = a.updatedAt ?? null
         }
+      }
+      // Some sessions stop reporting to Orca (started before it restarted, say) and their record
+      // stays at an old exchange while the terminal goes on. Then the screen itself is the news.
+      const term = live?.terminals.find((t) => t.handle === handles[key])
+      if (term && (term.lastOutputAt ?? 0) - (found.at ?? 0) > STALE_RECORD_MS) {
+        const rows = await readTerminalScreen(term.handle)
+        while (rows.length && !rows[rows.length - 1]!.trim()) rows.pop()
+        found.screen = rows.map((r) => r.trimEnd()).join('\n').slice(-MAX_SCREEN_CHARS) || null
       }
     } catch (err) {
       orca.log(`preview failed: ${(err as Error).message.split('\n')[0]}`)
     }
-    return none
+    return found
   })
 
   // Reply box: what you typed goes to that chat's terminal as your prompt. Nothing else ever sends input.

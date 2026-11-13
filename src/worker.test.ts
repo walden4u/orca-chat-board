@@ -502,8 +502,14 @@ test('Orca chat tabs (no terminal) get cards from `orca worktree ps`', async () 
 })
 
 test('hover preview answers the last prompt and reply from Orca, on demand', async () => {
+  let lastOutputAt = 1001
+  const reads: string[][] = []
   setOrcaRunner(async (args) => {
-    if (args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: [term(1)], visualLayouts: [] } })
+    if (args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: [term(1, { lastOutputAt })], visualLayouts: [] } })
+    if (args[1] === 'read') {
+      reads.push(args)
+      return JSON.stringify({ ok: true, result: { terminal: { tail: ['> new question  ', 'New answer.', '', ''] } } })
+    }
     if (args[1] === 'ps')
       return JSON.stringify({
         ok: true,
@@ -523,9 +529,18 @@ test('hover preview answers the last prompt and reply from Orca, on demand', asy
     return JSON.stringify({ ok: true, result: {} })
   })
   const worker = await mountWorker(main, { host: host() })
-  assert.deepEqual(await worker.request('chat.preview', { key: 'tab1' }), { prompt: 'fix the bug', message: 'Fixed it.', at: 9 })
-  assert.deepEqual(await worker.request('chat.preview', { key: 'nope' }), { prompt: null, message: null, at: null })
+  const record = { prompt: 'fix the bug', message: 'Fixed it.', at: 9 }
+  assert.deepEqual(await worker.request('chat.preview', { key: 'tab1' }), { ...record, screen: null })
+  assert.deepEqual(await worker.request('chat.preview', { key: 'nope' }), { prompt: null, message: null, at: null, screen: null })
   assert.deepEqual(worker.host.data().storage, {}, 'nothing is stored')
+
+  // The reply box asks for the screen too; it is read only when the terminal is well ahead of Orca's record.
+  await worker.request('board.get', { refresh: true })
+  assert.deepEqual(await worker.request('chat.preview', { key: 'tab1', screen: true }), { ...record, screen: null })
+  lastOutputAt = 9 + 10 * 60_000
+  assert.deepEqual(await worker.request('chat.preview', { key: 'tab1' }), { ...record, screen: null })
+  assert.deepEqual(await worker.request('chat.preview', { key: 'tab1', screen: true }), { ...record, screen: '> new question\nNew answer.' })
+  assert.deepEqual(reads, [['terminal', 'read', '--terminal', 'term_1', '--screen', '--json']])
   await worker.deactivate()
 })
 

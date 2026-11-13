@@ -297,6 +297,13 @@ export async function sendToTerminal(handle: string, text: string): Promise<void
   if (result?.send?.accepted === false) throw new Error('Orca did not accept the input')
 }
 
+/** The terminal's screen as it is drawn right now, one string per row (`orca terminal read --screen`). */
+export async function readTerminalScreen(handle: string): Promise<string[]> {
+  const result = (await runJson(['terminal', 'read', '--terminal', handle, '--screen'])) as { terminal?: { tail?: unknown } } | null
+  const tail = result?.terminal?.tail
+  return Array.isArray(tail) ? tail.filter((row): row is string => typeof row === 'string') : []
+}
+
 export async function switchTerminal(handle: string): Promise<void> {
   await runJson(['terminal', 'switch', '--terminal', handle])
 }

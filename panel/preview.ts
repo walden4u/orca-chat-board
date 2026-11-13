@@ -2,7 +2,7 @@
 // agent's last reply and shows them in a popover. Nothing is cached beyond a few seconds.
 import { t } from './i18n.ts'
 
-type Preview = { prompt: string | null; message: string | null; at: number | null }
+type Preview = { prompt: string | null; message: string | null; at: number | null; screen: string | null }
 
 const DELAY_MS = 400
 /** Right after a popover was open, the next card's shows almost at once (like system tooltips). */
@@ -39,7 +39,8 @@ const head = (s: string, n: number) => (s.length > n ? s.slice(0, n).trimEnd() +
 export async function loadPreview(key: string, fresh = false): Promise<Preview> {
   const hit = cache.get(key)
   if (!fresh && hit && Date.now() - hit.at < CACHE_MS) return hit.data
-  const data = (await orca.plugin.request('chat.preview' as never, { key } as never)) as Preview
+  // The reply box (`fresh`) also wants the terminal's screen when Orca's record is behind it.
+  const data = await orca.plugin.request('chat.preview', fresh ? { key, screen: true } : { key })
   cache.set(key, { at: Date.now(), data })
   return data
 }

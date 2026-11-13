@@ -219,6 +219,10 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .reply-input { resize: vertical; min-height: 4.4em; max-height: 40vh; line-height: 1.45; }
 .reply-row { display: flex; align-items: center; gap: 8px; }
 .reply-status { flex: 1; min-width: 0; color: var(--orca-destructive); word-break: break-word; }
+.reply-screen { border-top: 1px dashed var(--orca-border); padding-top: 8px; }
+.reply-screen pre { margin: 6px 0 0; padding: 8px; border-radius: 4px; overflow-x: auto; white-space: pre;
+  font: 11px/1.35 ui-monospace, "Cascadia Mono", Consolas, "D2Coding", monospace;
+  background: var(--orca-background); border: 1px solid var(--orca-border); }
 .reply-waiting { flex: none; color: var(--orca-muted-foreground); white-space: nowrap; }
 .reply-next { border-color: var(--orca-border); padding: 3px 10px; }
 .reply-row .primary { padding: 3px 14px; }
