@@ -4,6 +4,8 @@ A kanban of your **agent chats**: the Claude, Codex, Cursor, Gemini and other ag
 
 ![Chat Board in dark theme](assets/screenshot-dark.png)
 
+> **This is a fork** of [SantiagoCaprile/orca-chat-board](https://github.com/SantiagoCaprile/orca-chat-board). The `workspace-sync` branch adds two things to release 1.1.1: the board works on Windows (upstream issue #1), and it can follow Orca's Workspace Board in both directions. Neither is in an upstream release yet. [Using this fork](#using-this-fork) explains how to run it.
+
 ## Install
 
 ```sh
@@ -11,6 +13,89 @@ orca plugin install SantiagoCaprile/orca-chat-board
 ```
 
 Orca lists the access the plugin asks for (see [Permissions](#permissions)) and asks you to approve it. Then open **Chat Board** from the right sidebar's activity bar.
+
+That installs the upstream release. On Windows it shows an empty board; use the fork as described below.
+
+## Using this fork
+
+The fork runs from a folder on your machine as an Orca *development plugin*. Orca loads the TypeScript files directly, so there is nothing to build, and it reloads the plugin whenever a file in the folder changes.
+
+### Set it up (once)
+
+1. Get the code and switch to the branch with both changes:
+
+   ```sh
+   git clone https://github.com/walden4u/orca-chat-board
+   cd orca-chat-board
+   git checkout workspace-sync
+   ```
+
+2. Load the folder into Orca:
+
+   ```sh
+   orca plugin dev load .
+   ```
+
+   The plugin runs code, so the first load stops with `approval_required`. It lists the access the plugin asks for (see [Permissions](#permissions)) and prints the same command with `--approve <fingerprint>`. Run that command to approve it.
+
+3. If you also installed the upstream plugin from the catalog, turn it off so you do not get two Chat Board panels:
+
+   ```sh
+   orca plugin disable santiagocaprile.chat-board
+   ```
+
+4. Check that it runs. The fork shows up as `local.chat-board` with the `dev` tag:
+
+   ```sh
+   orca plugin list
+   # local.chat-board 1.1.1  running  trusted-worker, dev
+   ```
+
+5. Open **Chat Board** from the right sidebar's activity bar, or run `orca plugin open local.chat-board`.
+
+The folder now stays under **Settings → Plugins → Development folders**, and Orca loads it again each time it starts. To remove it, run `orca plugin dev unload local.chat-board`.
+
+Do not edit the files of a plugin installed from the catalog. Orca checks their hash and disables the plugin when they change. Make changes in the development folder.
+
+### A first look
+
+Every agent tab you have open, in any workspace, is one card. With the default settings the board has four columns of its own (Backlog, In progress, In review, Done), and new chats land in the first one.
+
+| You want to | Do this |
+|---|---|
+| Go to a chat | Click its card. Orca switches to that workspace and tab. |
+| Move a chat | Drag its card to another column, or up and down within a column. |
+| Rename a chat or add a note | Click ✎ on the card. Enter saves, Shift+Enter starts a new line in the note. |
+| See what a chat was about | Hover its card for a moment. You get your last message and the agent's last reply. |
+| Find a chat | Type in the filter box. It matches title, note, workspace and agent. |
+| Update the board now | Click ⟳. |
+| Clean up closed chats | They sit in **Archived**. Remove one with ✕ or all with **Clear**. |
+
+The icon on a card is the agent's status: a spinner while it works, an hourglass when it waits for you, a check when it is done, a red cross when it was interrupted, an alert when it needs permission. A yellow card finished while you were looking at another chat. The card with a coloured ring is the chat you have open now.
+
+### Use it together with the Workspace Board
+
+Click **⇄** in the panel's toolbar (or turn on **Sync with the Workspace Board** in Settings). From then on the two boards show the same thing from two sides: Orca's board by workspace, this one by chat.
+
+- **Columns are workspace statuses.** You get Todo, In progress, In review and Done, plus every custom status that a workspace is using. Turning sync on replaces the columns you had; each chat goes to the column of its workspace's status.
+- **Drag a chat here, and Orca follows.** Dropping a card in another column sets that workspace's status in Orca. The other chats of the same workspace move along, because a workspace has only one status.
+- **Move a workspace in Orca, and the chats follow here.** Orca does not announce the change, so the panel shows it within about 10 seconds. Click ⟳ to see it at once.
+- **Orca's side wins.** At every refresh the cards are put back in the column of their workspace's status.
+- **Name your custom statuses once.** Orca does not give plugins the name of a custom status, so its column first appears as `status-5` or similar. Double-click the title and type the name you use in Orca.
+- **Columns can be reordered (‹ ›), renamed and collapsed (⇤) here, but not added or deleted.** Add and remove statuses in Orca.
+- **"Move to In progress when you start a chat" is off while synced**, since the status now belongs to the workspace.
+
+Click ⇄ again to stop. The columns stay as they are and become ordinary columns that you can add to and delete.
+
+### When something looks wrong
+
+| What you see | What to do |
+|---|---|
+| The board is empty or shows an error | Run `orca plugin logs local.chat-board`. A failed CLI call is logged with the reason the CLI gave. |
+| The plugin is listed but not `running` or `idle` | It is waiting for approval. Run `orca plugin dev reload .` and follow the `--approve` command it prints. |
+| A column is called `status-5` | It is a custom status. Rename the column once (see above). |
+| A card did not move after you changed a status in Orca | Wait 10 seconds or click ⟳. |
+| A card has no status icon | Orca has not reported a status for that session yet. See [Limitations](#limitations). |
 
 ## What it does
 
@@ -84,7 +169,7 @@ The plugin makes no network requests and sends nothing anywhere. Some of what Or
 - Orca puts plugin panels in the right sidebar only.
 - Orca does not tell plugins about tab switches. While the panel is on screen, it checks which chat is open every 3 seconds.
 - Monitoring is recognised from tool calls, because Orca does not expose its own monitoring state to plugins. Only Claude Code's tool names are known so far. Orca does not run this hook for agents on SSH or WSL hosts.
-- Tested on macOS. On Linux and Windows the worker uses the CLI launcher Orca ships (`orca-ide` and the native `orca.exe`), but this has not been tried on those systems yet. If the board stays empty there, please open an issue.
+- Upstream is tested on macOS. This fork is used on Windows 10 with Orca 1.4.255. On Linux the worker uses the CLI launcher Orca ships (`orca-ide`), but this has not been tried yet. If the board stays empty there, please open an issue.
 - Orca's chat tabs show up once they have a conversation. A click opens their workspace but not the tab itself, because Orca cannot switch to a chat tab from outside yet. Loop monitoring is not detected in chat tabs, since Orca's tool hook names no terminal for them.
 - A chat shows no status icon until Orca reports one for it. Some sessions, such as ones started before Orca's status hooks were set up, never report.
 
@@ -100,9 +185,12 @@ The plugin makes no network requests and sends nothing anywhere. Some of what Or
 ```sh
 orca plugin dev watch . --check   # load this folder into Orca and reload on save
 orca plugin test .                # tests
-npx -p typescript tsc -p .        # type-check
-orca plugin shot local.chat-board --panel board --width 900
+npx -y -p typescript tsc -p tsconfig.ci.json --noEmit   # type-check
+orca plugin shot local.chat-board --panel board --width 900 --out board.png
+orca plugin logs local.chat-board # the worker's log
 ```
+
+Type-check with `tsconfig.ci.json`. `tsc -p .` writes `.js` files next to the sources.
 
 CI (GitHub Actions, Linux, macOS and Windows) type-checks against a snapshot of Orca's typings and runs the tests that need no Orca host. See [`ci/`](ci/README.md).
 
