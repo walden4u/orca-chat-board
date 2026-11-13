@@ -125,6 +125,8 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
   background: var(--orca-primary); color: var(--orca-primary-foreground); border: 1px solid var(--orca-primary);
 }
 .watch:hover { background: transparent; color: var(--orca-foreground); }
+.watch.off { background: transparent; border-color: var(--orca-muted-foreground); }
+.watch.off:hover { border-color: var(--orca-foreground); }
 
 .status { width: 16px; height: 16px; flex: none; display: inline-flex; margin-top: 1px; }
 .status svg { width: 100%; height: 100%; }

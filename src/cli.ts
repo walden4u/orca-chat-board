@@ -321,6 +321,11 @@ export async function pasteIntoTerminal(handle: string, text: string): Promise<v
   await runJson(['terminal', 'send', '--terminal', handle, `--text=\x1b[200~${clean}\x1b[201~`])
 }
 
+/** Closes a terminal's whole tab, as its close button does: the agent in it stops. */
+export async function closeTerminalTab(handle: string): Promise<void> {
+  await runJson(['terminal', 'close', '--terminal', handle, '--tab'])
+}
+
 /** Presses Enter in a terminal: submits what is in an agent's input. */
 export async function pressEnter(handle: string): Promise<void> {
   await runJson(['terminal', 'send', '--terminal', handle, '--enter'])

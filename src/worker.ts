@@ -23,6 +23,7 @@ import {
   activateWorktree,
   launchAgent,
   CHAT_TAB_PREFIX,
+  closeTerminalTab,
   listAgents,
   listTerminals,
   listWorkspaceStatuses,
@@ -523,6 +524,28 @@ export default function activate(orca: OrcaWorkerApi): void {
     } catch (err) {
       const reason = (err as Error).message.split('\n').pop() ?? ''
       orca.log(`send failed: ${reason}`)
+      return { ok: false, error: reason }
+    }
+  })
+
+  // A chat archived from its card: its tab is closed in Orca (there is no card without a tab to
+  // keep it on the board), and the next listing archives the card with its column and note.
+  orca.panels.handle('chat.archive', async ({ key }) => {
+    if (refreshedAt === 0) await serial(refresh)
+    const handle = handles[key]
+    const card = (await loadBoard()).cards[key]
+    if (!handle || !card || card.closed) return { ok: false, error: 'closed' }
+    if (card.sessionId) return { ok: false, error: 'chat-tab' }
+    try {
+      // Checked against a fresh listing: the tab that closes must still be this chat's.
+      const { terminals } = await listTerminals()
+      if (!terminals.some((t) => t.handle === handle && t.ptyId === card.ptyId)) return { ok: false, error: 'closed' }
+      await closeTerminalTab(handle)
+      await resync()
+      return { ok: true, error: null }
+    } catch (err) {
+      const reason = (err as Error).message.split('\n').pop() ?? ''
+      orca.log(`archive failed: ${reason}`)
       return { ok: false, error: reason }
     }
   })

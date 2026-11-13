@@ -7,7 +7,7 @@ import { STATUS_ICON, type StatusKind } from './icons.ts'
 import { locale, setLanguage, t } from './i18n.ts'
 import { isStale } from '../src/monitor.ts'
 import { hidePreview, schedulePreview } from './preview.ts'
-import { openReply, replyKey, setReplyWaiting } from './reply.ts'
+import { closeReply, openReply, replyKey, setReplyWaiting } from './reply.ts'
 
 const INTERRUPTED = new Set(['interruption', 'failure', 'cancellation'])
 
@@ -48,6 +48,7 @@ let editingCard: string | null = null
 let renamingColumn: string | null = null
 let confirmDeleteColumn: string | null = null
 let confirmClearArchive = false
+let confirmArchiveCard: string | null = null
 let dragKey: string | null = null
 /** When the last drag ended; a click right after a drop is not an "open". */
 let dragEndedAt = 0
@@ -239,10 +240,12 @@ async function setWatch(c: CardView, watch: boolean): Promise<void> {
   setView(await request<BoardView>('card.update', { key: c.key, watch }))
 }
 
-/** The check on a checked card: always shown, and a click on it unchecks. */
+/** The check, at the same place on every open card: a click there checks or unchecks the chat. */
 function watchMark(c: CardView): HTMLElement {
-  const mark = el('button', { class: 'watch', title: t.watchOn, 'aria-label': t.watchOn, 'aria-pressed': 'true' }, '✓')
-  mark.onclick = (e) => (e.stopPropagation(), void setWatch(c, false))
+  const on = !!c.watch
+  const hint = on ? t.watchOn : t.watchOff
+  const mark = el('button', { class: `watch${on ? '' : ' off'}`, title: hint, 'aria-label': hint, 'aria-pressed': on ? 'true' : 'false' }, on ? '✓' : '')
+  mark.onclick = (e) => (e.stopPropagation(), void setWatch(c, !on))
   return mark
 }
 
@@ -397,7 +400,7 @@ function renderCard(c: CardView): HTMLElement {
     el(
       'div',
       { class: 'card-top' },
-      c.watch && !c.closed ? watchMark(c) : null,
+      !c.closed ? watchMark(c) : null,
       c.unseenAt && !c.closed ? el('span', { class: 'unseen-dot', title: t.unseen, role: 'img', 'aria-label': t.unseen }) : null,
       el('span', { class: 'card-title' }, titleOf(c)),
       stateBadge
@@ -419,11 +422,6 @@ function renderCard(c: CardView): HTMLElement {
     open.onclick = (e) => (e.stopPropagation(), void focusChat(c))
     actions.append(open)
   }
-  if (!c.closed && !c.watch) {
-    const watch = el('button', { class: 'ghost', title: t.watchOff, 'aria-label': t.watchOff, 'aria-pressed': 'false' }, '✓')
-    watch.onclick = (e) => (e.stopPropagation(), void setWatch(c, true))
-    actions.append(watch)
-  }
   /** The reply box: what a click on the card opens. From there, or with a double-click, the chat itself. */
   const reply = () => showReply(c)
   const edit = el('button', { class: 'ghost', title: t.editCard }, '✎')
@@ -433,6 +431,35 @@ function renderCard(c: CardView): HTMLElement {
     render(true)
   }
   actions.append(edit)
+  if (!c.closed) {
+    // Archiving closes the chat's tab in Orca, so it asks first: a second click within 3 seconds.
+    const confirming = confirmArchiveCard === c.key
+    const ask = c.state === 'working' ? t.archiveConfirmWorking : c.agent === 'claude' && !c.sessionId ? t.archiveConfirm : t.archiveConfirmForGood
+    const away = el('button', { class: `ghost${confirming ? ' danger' : ''}`, title: t.archiveCard, 'aria-label': t.archiveCard }, confirming ? ask : '▾')
+    away.onclick = async (e) => {
+      e.stopPropagation()
+      if (!confirming) {
+        confirmArchiveCard = c.key
+        render(true)
+        setTimeout(() => {
+          if (confirmArchiveCard === c.key) {
+            confirmArchiveCard = null
+            render(true)
+          }
+        }, 3000)
+        return
+      }
+      confirmArchiveCard = null
+      away.setAttribute('disabled', '')
+      const r = await request<{ ok: boolean; error: string | null }>('chat.archive', { key: c.key })
+      if (r?.ok) {
+        if (replyKey() === c.key) closeReply()
+        showFlash(t.archiveDone, true)
+        setView(await request<BoardView>('board.get', {}))
+      } else if (r) showFlash(r.error === 'chat-tab' ? t.archiveChatTab : t.archiveFailed(r.error ?? ''))
+    }
+    actions.append(away)
+  }
   if (c.closed && c.agent === 'claude' && !c.sessionId) {
     // Always in sight, not among the hover buttons: it is what an archived chat is there for.
     const again = el('button', { class: 'ghost reopen', title: t.reopen }, `↻ ${t.reopenShort}`)

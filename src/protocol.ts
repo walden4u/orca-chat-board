@@ -133,6 +133,11 @@ declare module 'orca' {
      * Opens an archived Claude chat again: a new Claude tab in its workspace with Claude's list of
      * conversations to resume. `unsupported`: not a Claude terminal chat.
      */
+    /**
+     * Archives an open chat from its card: closes its terminal tab in Orca, which stops the agent
+     * in it. The card stays, in the archive. Orca's chat tabs cannot be closed from outside.
+     */
+    'chat.archive': { input: { key: string }; output: { ok: boolean; error: 'closed' | 'chat-tab' | string | null } }
     'chat.reopen': { input: { key: string }; output: { ok: boolean; error: 'open' | 'unsupported' | string | null } }
     /** One piece (base64, in order) of a picture attached in the reply box; kept in memory until Send. */
     'attach.put': { input: { id: string; type: string; data: string }; output: { result: 'ok' | 'type' | 'size' | 'count' } }

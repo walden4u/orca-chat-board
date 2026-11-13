@@ -65,6 +65,37 @@ test('new agent chats land in the first column; plain shells are skipped', async
   await worker.deactivate()
 })
 
+test('archiving from the card closes the chat tab in Orca and keeps the card', async () => {
+  let live = [term(1), term(2)]
+  const calls: string[][] = []
+  setOrcaRunner(async (args) => {
+    calls.push(args)
+    if (args[0] === 'terminal' && args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: live, visualLayouts: [] } })
+    if (args[0] === 'terminal' && args[1] === 'close') {
+      live = live.filter((t) => t.handle !== args[3])
+      return JSON.stringify({ ok: true, result: {} })
+    }
+    if (args[0] === 'worktree' && args[1] === 'ps') return JSON.stringify({ ok: true, result: { worktrees: [] } })
+    throw new Error(`unexpected ${args.join(' ')}`)
+  })
+  const worker = await mountWorker(main, { host: host() })
+  await worker.request('board.get', { refresh: true })
+  await worker.request('card.update', { key: 'tab2', note: 'later' })
+  assert.deepEqual(await worker.request('chat.archive', { key: 'tab2' }), { ok: true, error: null })
+  assert.deepEqual(
+    calls.find((c) => c[1] === 'close'),
+    ['terminal', 'close', '--terminal', 'term_2', '--tab', '--json']
+  )
+  const v = (await worker.request('board.get', {})) as BoardView
+  const card = v.cards.find((c) => c.key === 'tab2')
+  assert.equal(card?.closed, true)
+  assert.equal(card?.note, 'later')
+  // Already archived: nothing left to close.
+  assert.deepEqual(await worker.request('chat.archive', { key: 'tab2' }), { ok: false, error: 'closed' })
+  assert.equal(calls.filter((c) => c[1] === 'close').length, 1)
+  await worker.deactivate()
+})
+
 test('a chat that disappears is archived with its column and note', async () => {
   let live = [term(1), term(2)]
   fakeCli(() => live)

@@ -87,7 +87,7 @@ Every tab that runs an agent is one card: terminal tabs, and Orca's chat tabs on
 | Read a chat's last reply and answer it | Click the card. See [Reply to a chat](#reply-to-a-chat). |
 | Go to the chat in Orca | Double-click its card, or click ↗ on the card or in the reply box. |
 | See what a chat was about | Hover its card for a moment. |
-| Have a chat come to you when it finishes | Hover its card and click ✓. See [Checked chats](#checked-chats). |
+| Have a chat come to you when it finishes | Click the box at the top left of its card. See [Checked chats](#checked-chats). |
 | Move a chat | Drag its card to another column, or up and down within a column. |
 | Rename a chat or add a note | Click ✎ on the card. Enter saves, Shift+Enter starts a new line in the note. The name is the chat's Orca tab name. |
 | Find a chat | Type in the filter box. It matches title, note, workspace and agent. |
@@ -136,7 +136,7 @@ Click a card to open its reply box. It shows your last message and the agent's w
 
 ## Checked chats
 
-Check a card (✓ on hover) and its reply box opens by itself when that chat's agent finishes or asks you something, also when its tab is the one on screen in Orca.
+Check a card (the box at its top left, always there; click again to uncheck) and its reply box opens by itself when that chat's agent finishes or asks you something, also when its tab is the one on screen in Orca.
 
 - **One after the other.** Answer the box, or leave it unanswered with **Next** or ✕, and the box of the next checked chat that finished opens, in the order they finished. The box says how many are waiting.
 - **It does not take the keyboard.** A box that opened by itself leaves the cursor where it is, so what you are typing elsewhere stays there. Click its field to type in it.
@@ -148,7 +148,7 @@ The check is saved with the card. Chats that are not checked only turn yellow.
 
 ## The archive, and continuing a chat
 
-A chat you close goes to the archive and keeps its column, note and check. The archive is put away by default: **Archive N** in the toolbar shows how many chats it holds and opens it under the board, up to 40% of the panel's height. The same button, or the archive's title line, puts it away again. Remove one card with ✕, or all of them with **Clear**.
+A chat you close goes to the archive and keeps its column, note and check. You can close it in Orca, or from its card: **▾** among the card's hover buttons closes that chat's tab in Orca. It asks first with a second click, because the agent in that tab stops, and it warns when the chat cannot be opened again (anything but a Claude terminal chat). Orca's own chat tabs cannot be closed this way. The archive is put away by default: **Archive N** in the toolbar shows how many chats it holds and opens it under the board, up to 40% of the panel's height. The same button, or the archive's title line, puts it away again. Remove one card with ✕, or all of them with **Clear**.
 
 Orca does not keep agent tabs across a restart, so after one most cards are in the archive. To continue such a chat, click **↻ Continue** on its card:
 
@@ -254,6 +254,7 @@ Orca asks you to approve these when you load the plugin. Here is what each one i
 | `orca terminal send` | you press Send in a reply box | Your text and the paths of the images you attached, to that one chat. |
 | `orca terminal read --screen` | a reply box opens | The agent's suggested next prompt, and the screen itself when Orca's record of the chat is behind its terminal. |
 | `orca terminal read --screen` | a terminal has fresh output long after Orca's record of a finished turn | Telling whether that chat is working. Only a busy-or-not answer is kept. |
+| `orca terminal close --tab` | you click ▾ on a card, then confirm | Closing that chat's tab, which stops the agent in it. |
 | `orca agent launch`, then `orca terminal send` with `/resume` | you click ↻ Continue on an archived card | Starting Claude in that workspace with its list of conversations. |
 | `orca worktree list`, `orca worktree set --workspace-status` | the Workspace Board sync is on | Reading every workspace's status, and setting one when you drag a card. |
 

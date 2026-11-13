@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The check has a fixed place:** every open card shows the box at its top left, empty or checked, and a click there turns it on or off. Before, an unchecked card had the button only among the hover buttons.
+- **Archive from the card:** a new button on an open card (▾, among the hover buttons) closes that chat's tab in Orca, which moves the card to the archive. It asks first with a second click, and says so when the agent is working or when the chat cannot be opened again (anything but a Claude terminal chat). Orca's chat tabs cannot be closed from outside.
 - **Sync with the Workspace Board** (off by default): columns become Orca's workspace statuses. Dragging a chat sets its workspace's status, and moving a workspace on Orca's board moves its chats. Turn it on in Settings or with the ⇄ button.
 - **Synced column names follow Orca:** rename, add or remove a status on Orca's Workspace Board and the columns follow. Orca has no command for the status names, so the worker reads them from Orca's profile database, read-only. If that fails, the board keeps its names and lets you rename columns as before.
 - **Check Orca automatically** (on by default): turn it off to stop the check that runs every 3 seconds while the panel is on screen, and update with ⟳ instead.
