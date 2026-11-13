@@ -4,6 +4,7 @@ import * as main from './worker.ts'
 import { setOrcaRunner } from './cli.ts'
 import { activeTabsByWorktree, cleanTitle, defaultColumns, emptyBoard, mergeChats, moveCard, setColumns, type LiveTerminal } from './board.ts'
 import type { BoardView } from './protocol.ts'
+import { looksBusy } from './screen.ts'
 
 const WT = 'repo::/Users/me/toolbox::workspace:1'
 
@@ -541,6 +542,81 @@ test('hover preview answers the last prompt and reply from Orca, on demand', asy
   assert.deepEqual(await worker.request('chat.preview', { key: 'tab1' }), { ...record, screen: null })
   assert.deepEqual(await worker.request('chat.preview', { key: 'tab1', screen: true }), { ...record, screen: '> new question\nNew answer.' })
   assert.deepEqual(reads, [['terminal', 'read', '--terminal', 'term_1', '--screen', '--json']])
+  await worker.deactivate()
+})
+
+test('a turn whose end shows up in a listing before its event is still news', async () => {
+  // Two chats finish close together: the first one's event lists the agents, and that listing
+  // already says the second one is done. Its own event then brings nothing new.
+  let psState: 'working' | 'done' = 'working'
+  setOrcaRunner(async (args) => {
+    if (args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: [term(1), term(2)], visualLayouts: [] } })
+    if (args[1] === 'ps') {
+      const agents = [{ paneKey: 'tab2:leaf', parentPaneKey: null, state: psState, agentType: 'claude', hasLivePty: true, stateStartedAt: psState === 'done' ? 30 : 10 }]
+      return JSON.stringify({ ok: true, result: { worktrees: [{ worktreeId: WT, path: '/Users/me/toolbox', agents }] } })
+    }
+    throw new Error(`unexpected ${args.join(' ')}`)
+  })
+  const worker = await mountWorker(main, { host: host() })
+  await worker.request('board.get', { refresh: true })
+  const status = (terminalId: string, state: 'working' | 'done', receivedAt: number) =>
+    worker.emit('agent.status.changed', { workspaceId: null, paneKey: terminalId, terminalId, state, receivedAt })
+  const unseen = async () => ((await worker.request('board.get', {})) as BoardView).cards.filter((c) => c.unseenAt).map((c) => c.key).sort()
+
+  await status('term_1', 'working', 10)
+  await status('term_2', 'working', 10)
+  psState = 'done'
+  await status('term_1', 'done', 20) // its refresh lists tab2 as done already
+  assert.deepEqual(await unseen(), ['tab1', 'tab2'])
+  await status('term_2', 'done', 30) // nothing new, and nothing lost
+  assert.deepEqual(await unseen(), ['tab1', 'tab2'])
+  await worker.deactivate()
+})
+
+test('a chat Orca lost track of gets its status from its terminal', async () => {
+  const BUSY = ['● Reading files', '✽ Wrangling… (2m 22s · ↓ 9.4k tokens)', '❯', '  auto mode on']
+  const IDLE = ['● Done.', '✻ Cooked for 10s · done 9:12 PM', '❯', '  auto mode on']
+  assert.equal(looksBusy(BUSY), true)
+  assert.equal(looksBusy(['· Sock-hopping… (running Stop hooks… 4/5 · 14s · ↓ 706 tokens)']), true)
+  assert.equal(looksBusy(['  press esc to interrupt']), true)
+  assert.equal(looksBusy(IDLE), false)
+  assert.equal(looksBusy(['❯ wait… (I am typing this for 20s)']), false)
+
+  let lastOutputAt = Date.now()
+  let screen = BUSY
+  let reads = 0
+  setOrcaRunner(async (args) => {
+    if (args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: [term(1, { lastOutputAt })], visualLayouts: [] } })
+    if (args[1] === 'read') {
+      reads++
+      return JSON.stringify({ ok: true, result: { terminal: { tail: screen } } })
+    }
+    if (args[1] === 'ps') return JSON.stringify({ ok: true, result: { worktrees: [] } })
+    throw new Error(`unexpected ${args.join(' ')}`)
+  })
+  const worker = await mountWorker(main, { host: host() })
+  const card = async () => ((await worker.request('board.get', { refresh: true })) as BoardView).cards[0]!
+
+  // Fresh output and a busy screen, with nothing from Orca: a turn is running.
+  assert.equal((await card()).state, 'working')
+  // The terminal went quiet and the screen is idle: the turn is over, and that is news.
+  lastOutputAt = Date.now() - 60_000
+  screen = IDLE
+  let c = await card()
+  assert.deepEqual([c.state, c.stateAt, c.unseenAt], ['done', lastOutputAt, lastOutputAt])
+  assert.equal(reads, 2)
+
+  // You typing at the prompt: output, but no busy screen. Nothing changes, and the screen is not read each time.
+  lastOutputAt = Date.now()
+  c = await card()
+  assert.equal(c.state, 'done')
+  await card()
+  assert.equal(reads, 3)
+
+  // A real event from Orca takes over.
+  await worker.emit('agent.status.changed', { workspaceId: null, paneKey: 'term_1', terminalId: 'term_1', state: 'working', receivedAt: Date.now() })
+  lastOutputAt = Date.now() - 60_000
+  assert.equal((await card()).state, 'working')
   await worker.deactivate()
 })
 

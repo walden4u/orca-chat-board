@@ -18,6 +18,11 @@ export type ReplyTarget = {
    * you may be typing in a terminal, and that text must not land here.
    */
   auto: boolean
+  /**
+   * The box opened from a click on the card, so a second click right away is that card's
+   * double-click. Not when it follows another box: there a quick second click is you closing boxes.
+   */
+  fromCard: boolean
   /** Checked chats that finished and wait behind this one. */
   waiting: number
 }
@@ -185,11 +190,11 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   next.onclick = () => leave(handlers.onNext)
   send.onclick = () => void submit()
   // Double-click on a card: its first click opened this box, its second one arrives here.
-  // Not for a box that opened by itself: a double-click meant for something else could meet it.
+  // Only for a box that a card click opened (see `fromCard`).
   backdrop.addEventListener(
     'mousedown',
     (e) => {
-      if (target.auto || e.detail < 2 || Date.now() - openedAt > DOUBLE_CLICK_MS) return
+      if (!target.fromCard || e.detail < 2 || Date.now() - openedAt > DOUBLE_CLICK_MS) return
       e.preventDefault()
       e.stopPropagation()
       leave(handlers.onOpenChat)

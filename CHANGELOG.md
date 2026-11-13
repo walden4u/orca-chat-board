@@ -9,6 +9,9 @@
 - **Reply box:** a click on a card now shows your last message and the agent's whole last reply, and lets you answer. A double-click, or ↗, opens the chat in Orca as a click did before. Send types your text into that chat's terminal (`orca terminal send`). Orca's chat tabs can be read but not answered.
 - **Checked chats open by themselves:** check a card and its reply box opens when its agent finishes; answering or pressing Next opens the next one that finished. The check mark stays on the card and unchecks with a click.
 - **Reply box on a chat Orca lost track of:** when Orca's record of a chat is behind its terminal, the box shows the terminal's screen as it is now under the old exchange, with the time of the record. What you sent from the box is shown until the record catches up.
+- **Status for chats Orca lost track of:** a session that stopped reporting to Orca stayed "done" on its card for hours while it worked. Its status is now read off its terminal (fresh output and a busy screen), so the card, the unseen mark and a checked chat's reply box follow it again.
+- **Chats that finish close together:** the end of a turn could be read from a listing before its event arrived; the event then looked like nothing new, so the card got no unseen mark and a checked chat opened no reply box. Either way of learning it now counts.
+- **Send no longer waits behind the automatic check:** on a busy machine the checks queued up in the worker and Send timed out after 30 seconds. One check runs at a time, and Send does not go through that queue.
 - **Korean UI:** the panel is in Korean when Orca is, or when you pick 한국어 under Language.
 - **Filter:** text typed through an IME (Korean, Japanese, Chinese) arrived as loose letters, because the filter box was replaced on every keystroke.
 - **Bigger hover preview:** as wide as the panel and as tall as the room above or below the card, with the reply shown from its start.

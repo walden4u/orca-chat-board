@@ -61,6 +61,8 @@ let toolbarEl: HTMLElement | null = null
 const show = { agent: true, workspace: true, status: true, time: true, notes: true, preview: true }
 /** The "Check Orca automatically" setting: off means the board asks Orca only on ⟳, on opening and on Orca's events. */
 let autoCheck = true
+/** An automatic check is on its way to the worker and back. */
+let checking = false
 
 async function loadSettings(): Promise<void> {
   try {
@@ -215,7 +217,7 @@ function watchMark(c: CardView): HTMLElement {
 /** Checked chats that finished and were not seen yet, in the order they finished. */
 function waitingCards(except?: string | null): CardView[] {
   return (view?.cards ?? [])
-    .filter((c) => c.watch && !c.closed && !!c.unseenAt && c.key !== except)
+    .filter((c) => c.watch && !c.closed && !!c.unseenAt && c.unseenAt !== readHere.get(c.key) && c.key !== except)
     .sort((a, b) => (a.unseenAt ?? 0) - (b.unseenAt ?? 0))
 }
 
@@ -226,11 +228,25 @@ function waitingCards(except?: string | null): CardView[] {
 let queueHeldAt = 0
 const QUEUE_HOLD_MS = 120_000
 
-function showReply(c: CardView, auto = false): void {
+/**
+ * The unseen mark each chat had when its box opened here. The worker clears the mark a moment
+ * later; until then a board update can still carry it, and it must not put the chat back in line.
+ */
+const readHere = new Map<string, number>()
+
+/** One line in the plugin's log (`orca plugin logs`) about the reply boxes: what opened, how it was left. */
+function trace(message: string): void {
+  void orca.plugin.request('trace', { message }).catch(() => undefined)
+}
+
+function showReply(c: CardView, how: 'click' | 'auto' | 'next' = 'click'): void {
   hidePreview()
   const kind = statusOf(c)
+  const id = c.key.slice(0, 8)
+  trace(`reply open ${id} (${how}), ${waitingCards(c.key).length} waiting`)
   if (c.unseenAt) {
     // Read here counts as seen (it leaves the queue too), at once and then in the worker.
+    readHere.set(c.key, c.unseenAt)
     c.unseenAt = null
     render()
     void request<BoardView>('card.seen', { key: c.key }).then((v) => setView(v))
@@ -243,18 +259,27 @@ function showReply(c: CardView, auto = false): void {
       chatTab: !!c.sessionId,
       working: kind === 'working',
       blocked: kind === 'blocked',
-      auto,
+      auto: how === 'auto',
+      fromCard: how === 'click',
       waiting: waitingCards(c.key).length
     },
     {
       onSent: (title) => {
+        trace(`reply left ${id}: sent`)
         showFlash(t.sent(title))
         openNextWaiting(true)
       },
       // Closing a box is done with that chat, not with the queue: the next one that waits opens.
-      onNext: () => openNextWaiting(true),
-      onClosed: () => openNextWaiting(true),
+      onNext: () => {
+        trace(`reply left ${id}: next`)
+        openNextWaiting(true)
+      },
+      onClosed: () => {
+        trace(`reply left ${id}: closed`)
+        openNextWaiting(true)
+      },
       onOpenChat: () => {
+        trace(`reply left ${id}: to the chat, queue held`)
         queueHeldAt = Date.now()
         void focusChat(c)
       }
@@ -280,7 +305,7 @@ function openNextWaiting(asked = false): void {
     if (Date.now() - queueHeldAt < QUEUE_HOLD_MS && !queue.some((c) => (c.unseenAt ?? 0) > queueHeldAt)) return
   }
   queueHeldAt = 0
-  showReply(queue[0]!, !asked)
+  showReply(queue[0]!, asked ? 'next' : 'auto')
 }
 
 function moveLocal(key: string, column: string, index: number): void {
@@ -754,19 +779,26 @@ function boot(): void {
   // While synced the same check brings what changed on Orca's board: a card's column, a status's name.
   const liveKey = (v: BoardView | null) =>
     JSON.stringify([
-      (v?.cards ?? []).map((c) => `${c.key}:${c.active ? 1 : 0}:${c.unseenAt ? 1 : 0}:${c.column}`).sort(),
+      // The state too: for a chat Orca lost track of, it comes from this check and not from an event.
+      (v?.cards ?? []).map((c) => `${c.key}:${c.active ? 1 : 0}:${c.unseenAt ? 1 : 0}:${c.column}:${c.state}:${c.stateAt}`).sort(),
       (v?.columns ?? []).map((c) => [c.id, c.title]),
       v?.orcaNames === true
     ])
   setInterval(() => {
     // Each check starts the orca CLI once, so it can be turned off; ⟳ then does it on demand.
-    if (!autoCheck || document.visibilityState !== 'visible' || !view) return
-    void orca.plugin.request('seen.check', {}).then(
-      (v) => {
-        if (liveKey(v as BoardView) !== liveKey(view)) setView(v as BoardView)
-      },
-      () => undefined
-    )
+    // One check at a time: when a check takes longer than the interval (a busy machine), asking
+    // again would only queue up in the worker and hold back everything else, Send included.
+    if (!autoCheck || checking || document.visibilityState !== 'visible' || !view) return
+    checking = true
+    void orca.plugin
+      .request('seen.check', {})
+      .then(
+        (v) => {
+          if (liveKey(v as BoardView) !== liveKey(view)) setView(v as BoardView)
+        },
+        () => undefined
+      )
+      .finally(() => (checking = false))
   }, 3000)
   // A checked chat may have finished while the panel was out of sight.
   document.addEventListener('visibilitychange', () => openNextWaiting())

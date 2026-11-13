@@ -103,6 +103,8 @@ declare module 'orca' {
     'seen.check': { input: Record<string, never>; output: BoardView }
     /** You read this chat in its reply box: clears its unseen mark. */
     'card.seen': { input: { key: string }; output: BoardView }
+    /** Writes one line from the panel to the plugin's log (which box opened, how it was left). */
+    trace: { input: { message: string }; output: null }
     /** Forgets every closed chat. */
     'archive.clear': { input: Record<string, never>; output: BoardView }
     /** Your last prompt and the agent's last message, read from Orca when asked (never stored). */
