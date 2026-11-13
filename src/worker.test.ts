@@ -5,6 +5,7 @@ import { setOrcaRunner } from './cli.ts'
 import { activeTabsByWorktree, cleanTitle, defaultColumns, emptyBoard, mergeChats, moveCard, setColumns, type LiveTerminal } from './board.ts'
 import type { BoardView } from './protocol.ts'
 import { looksBusy } from './screen.ts'
+import { readFileSync, unlinkSync } from 'node:fs'
 
 const WT = 'repo::/Users/me/toolbox::workspace:1'
 
@@ -542,6 +543,44 @@ test('hover preview answers the last prompt and reply from Orca, on demand', asy
   assert.deepEqual(await worker.request('chat.preview', { key: 'tab1' }), { ...record, screen: null })
   assert.deepEqual(await worker.request('chat.preview', { key: 'tab1', screen: true }), { ...record, screen: '> new question\nNew answer.' })
   assert.deepEqual(reads, [['terminal', 'read', '--terminal', 'term_1', '--screen', '--json']])
+  await worker.deactivate()
+})
+
+test('pictures attached in the reply box are pasted as file paths before the text', async () => {
+  const calls: string[][] = []
+  setOrcaRunner(async (args) => {
+    calls.push(args)
+    if (args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: [term(1)], visualLayouts: [] } })
+    if (args[1] === 'send') return JSON.stringify({ ok: true, result: { send: { accepted: true } } })
+    if (args[1] === 'ps') return JSON.stringify({ ok: true, result: { worktrees: [] } })
+    throw new Error(`unexpected ${args.join(' ')}`)
+  })
+  const worker = await mountWorker(main, { host: host() })
+  await worker.request('board.get', { refresh: true })
+  const sends = () => calls.filter((c) => c[1] === 'send').map((c) => c.slice(4, -1))
+
+  // A 1x1 PNG, handed over in two pieces.
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+  assert.deepEqual(await worker.request('attach.put', { id: 'pic-1', type: 'image/png', data: png.slice(0, 40) }), { result: 'ok' })
+  assert.deepEqual(await worker.request('attach.put', { id: 'pic-1', type: 'image/png', data: png.slice(40) }), { result: 'ok' })
+  assert.deepEqual(await worker.request('attach.put', { id: 'x', type: 'text/html', data: 'aGk=' }), { result: 'type' })
+  assert.deepEqual(await worker.request('attach.put', { id: 'x', type: 'image/png', data: '<script>' }), { result: 'type' })
+
+  assert.deepEqual(await worker.request('chat.send', { key: 'tab1', text: 'look', images: ['pic-1'] }), { ok: true, error: null })
+  const [paste, text] = sends()
+  assert.match(paste![0]!, /^--text=\x1b\[200~.*orca-chat-board.paste-\d+-pic-1\.png\x1b\[201~$/)
+  assert.equal(paste!.length, 1, 'the picture is pasted without Enter')
+  assert.deepEqual(text, ['--text=look', '--enter'])
+  const file = paste![0]!.slice('--text=\x1b[200~'.length, -'\x1b[201~'.length)
+  assert.equal(readFileSync(file).length, 70, 'the file holds the picture')
+  unlinkSync(file)
+
+  // Only a picture: Enter alone submits it. A picture sent once is gone.
+  await worker.request('attach.put', { id: 'pic-2', type: 'image/png', data: png })
+  assert.deepEqual(await worker.request('chat.send', { key: 'tab1', text: '', images: ['pic-2'] }), { ok: true, error: null })
+  assert.deepEqual(sends().at(-1), ['--enter'])
+  unlinkSync(sends().at(-2)![0]!.slice('--text=\x1b[200~'.length, -'\x1b[201~'.length))
+  assert.deepEqual(await worker.request('chat.send', { key: 'tab1', text: 'again', images: ['pic-2'] }), { ok: false, error: 'image-lost' })
   await worker.deactivate()
 })
 

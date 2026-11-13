@@ -121,7 +121,15 @@ declare module 'orca' {
      * Sends `text` to the chat as your next prompt (typed into its terminal, then Enter). Only when
      * you press Send in the reply box. `chat-tab`: Orca has no way to send to its chat tabs.
      */
-    'chat.send': { input: { key: string; text: string }; output: { ok: boolean; error: 'closed' | 'chat-tab' | 'empty' | string | null } }
+    'chat.send': {
+      /** `images`: ids of pictures handed over with `attach.put`; they are attached before the text. */
+      input: { key: string; text: string; images?: string[] }
+      output: { ok: boolean; error: 'closed' | 'chat-tab' | 'empty' | 'image-lost' | string | null }
+    }
+    /** One piece (base64, in order) of a picture attached in the reply box; kept in memory until Send. */
+    'attach.put': { input: { id: string; type: string; data: string }; output: { result: 'ok' | 'type' | 'size' | 'count' } }
+    /** Forgets a picture that was attached and not sent. */
+    'attach.drop': { input: { id: string }; output: null }
   }
   interface PluginPanelEvents {
     'board.changed': BoardView

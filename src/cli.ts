@@ -297,6 +297,21 @@ export async function sendToTerminal(handle: string, text: string): Promise<void
   if (result?.send?.accepted === false) throw new Error('Orca did not accept the input')
 }
 
+/**
+ * Pastes `text` into a terminal's input without submitting it (a bracketed paste, written as is).
+ * Claude Code turns a pasted path of an image file into an attached image.
+ */
+export async function pasteIntoTerminal(handle: string, text: string): Promise<void> {
+  // The text must not end the paste itself or smuggle in other control sequences.
+  const clean = text.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
+  await runJson(['terminal', 'send', '--terminal', handle, `--text=\x1b[200~${clean}\x1b[201~`])
+}
+
+/** Presses Enter in a terminal: submits what is in an agent's input. */
+export async function pressEnter(handle: string): Promise<void> {
+  await runJson(['terminal', 'send', '--terminal', handle, '--enter'])
+}
+
 /** The terminal's screen as it is drawn right now, one string per row (`orca terminal read --screen`). */
 export async function readTerminalScreen(handle: string): Promise<string[]> {
   const result = (await runJson(['terminal', 'read', '--terminal', handle, '--screen'])) as { terminal?: { tail?: unknown } } | null

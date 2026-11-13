@@ -24,6 +24,8 @@ import {
   listAgents,
   listTerminals,
   listWorkspaceStatuses,
+  pasteIntoTerminal,
+  pressEnter,
   readTerminalScreen,
   renameChat,
   renameTerminal,
@@ -33,6 +35,7 @@ import {
   type PsWorktree
 } from './cli.ts'
 import { applyToolCall, monitorView, onRun, type StoredMonitor } from './monitor.ts'
+import { dropAttachment, putAttachment, saveAttachment } from './attach.ts'
 import { readWorkspaceStatusNames } from './profile.ts'
 import { looksBusy } from './screen.ts'
 import { applyWorkspaceStatuses, editSyncedColumns, moveWorkspaceCards } from './sync.ts'
@@ -44,6 +47,8 @@ const MONITORS_KEY = 'monitors'
 const STATUS_POLL_MS = 10_000
 /** A prompt sent from the reply box travels as one command-line argument. */
 const MAX_PROMPT_CHARS = 8000
+const MAX_IMAGES = 5
+const ATTACH_SETTLE_MS = 600
 /** Terminal output this much newer than Orca's record of the chat: the record is behind. */
 const STALE_RECORD_MS = 120_000
 const MAX_SCREEN_CHARS = 20_000
@@ -463,9 +468,17 @@ export default function activate(orca: OrcaWorkerApi): void {
   })
 
   // Reply box: what you typed goes to that chat's terminal as your prompt. Nothing else ever sends input.
-  orca.panels.handle('chat.send', async ({ key, text }) => {
+  // Pictures pasted into the reply box arrive in pieces and wait here until Send.
+  orca.panels.handle('attach.put', ({ id, type, data }) => ({ result: putAttachment(String(id), String(type), String(data ?? ''), Date.now()) }))
+  orca.panels.handle('attach.drop', ({ id }) => {
+    dropAttachment(String(id))
+    return null
+  })
+
+  orca.panels.handle('chat.send', async ({ key, text, images }) => {
     const prompt = typeof text === 'string' ? text.trim().slice(0, MAX_PROMPT_CHARS) : ''
-    if (!prompt) return { ok: false, error: 'empty' }
+    const pictures = Array.isArray(images) ? images.filter((id): id is string => typeof id === 'string').slice(0, MAX_IMAGES) : []
+    if (!prompt && !pictures.length) return { ok: false, error: 'empty' }
     if (refreshedAt === 0) await serial(refresh)
     const handle = handles[key]
     const card = (await loadBoard()).cards[key]
@@ -476,7 +489,17 @@ export default function activate(orca: OrcaWorkerApi): void {
       // not through the refresh queue, which can be seconds behind while you wait on Send.
       const { terminals } = await listTerminals()
       if (!terminals.some((t) => t.handle === handle && t.ptyId === card.ptyId)) return { ok: false, error: 'closed' }
-      await sendToTerminal(handle, prompt)
+      // Pictures first: each one's path is pasted into the agent's input, which attaches the image.
+      const host = { platform: process.platform, env: process.env }
+      for (const id of pictures) {
+        const path = saveAttachment(id, host, Date.now())
+        if (!path) return { ok: false, error: 'image-lost' }
+        await pasteIntoTerminal(handle, path)
+      }
+      // The agent reads a pasted picture before it shows in the input; Enter must come after that.
+      if (pictures.length) await new Promise((done) => setTimeout(done, ATTACH_SETTLE_MS))
+      if (prompt) await sendToTerminal(handle, prompt)
+      else await pressEnter(handle)
       return { ok: true, error: null }
     } catch (err) {
       const reason = (err as Error).message.split('\n').pop() ?? ''

@@ -223,6 +223,15 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .reply-screen pre { margin: 6px 0 0; padding: 8px; border-radius: 4px; overflow-x: auto; white-space: pre;
   font: 11px/1.35 ui-monospace, "Cascadia Mono", Consolas, "D2Coding", monospace;
   background: var(--orca-background); border: 1px solid var(--orca-border); }
+.reply-shelf { display: flex; flex-wrap: wrap; gap: 6px; }
+.reply-shelf[hidden] { display: none; }
+.reply-thumb { position: relative; width: 64px; height: 64px; border-radius: 4px; overflow: hidden;
+  border: 1px solid var(--orca-border); background: var(--orca-background); }
+.reply-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.reply-thumb.busy img { opacity: .4; }
+.reply-thumb button { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; padding: 0; border: none;
+  border-radius: 50%; font-size: 9px; line-height: 16px; text-align: center;
+  background: var(--orca-popover); color: var(--orca-popover-foreground); }
 .reply-waiting { flex: none; color: var(--orca-muted-foreground); white-space: nowrap; }
 .reply-next { border-color: var(--orca-border); padding: 3px 10px; }
 .reply-row .primary { padding: 3px 14px; }
