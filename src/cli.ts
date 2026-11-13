@@ -134,7 +134,27 @@ export function orcaInvocation(command: OrcaCommand, args: string[], host: OrcaH
   return { file: shell, args: ['/d', '/s', '/c', `"${line}"`], verbatim: true, env: command.env }
 }
 
+/**
+ * Variables to add to the CLI's environment. Orca starts plugin workers with a short list of
+ * variables that leaves out APPDATA, and on Windows the CLI needs it to find the running Orca.
+ */
+export function extraEnv(host: OrcaHost, env?: Record<string, string>): Record<string, string> | undefined {
+  const profile = envGet(host, 'USERPROFILE')
+  if (host.platform !== 'win32' || envGet(host, 'APPDATA') || !profile) return env
+  return { APPDATA: join(host, profile, 'AppData', 'Roaming'), ...env }
+}
+
+/** The reason the CLI gives on stdout (`{"ok":false,"error":{"message":…}}`) when it fails. */
+function cliError(stdout: string): string {
+  try {
+    return (JSON.parse(stdout) as { error?: { message?: string } }).error?.message ?? ''
+  } catch {
+    return ''
+  }
+}
+
 function execOnce(inv: OrcaInvocation): Promise<string> {
+  const env = extraEnv(currentHost(), inv.env)
   return new Promise((resolve, reject) =>
     execFile(
       inv.file,
@@ -144,11 +164,12 @@ function execOnce(inv: OrcaInvocation): Promise<string> {
         timeout: 15000,
         windowsHide: true,
         windowsVerbatimArguments: inv.verbatim,
-        ...(inv.env ? { env: { ...process.env, ...inv.env } } : {})
+        ...(env ? { env: { ...process.env, ...env } } : {})
       },
       (err, stdout, stderr) => {
         if (err) {
-          const e = new Error(`${err.message}${stderr ? `\n${stderr}` : ''}`) as Error & { code?: unknown }
+          const detail = stderr || cliError(stdout)
+          const e = new Error(`${err.message}${detail ? `\n${detail}` : ''}`) as Error & { code?: unknown }
           e.code = (err as { code?: unknown }).code
           reject(e)
         } else resolve(stdout)

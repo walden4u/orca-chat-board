@@ -1,6 +1,6 @@
 // Resolver and Windows quoting tests: the machine is faked, so Windows runs are checked on any OS.
 import { assert, test } from 'orca/testing'
-import { findOnWindowsPath, orcaCommands, orcaInvocation, quoteCmdArg, type OrcaHost } from './cli.ts'
+import { extraEnv, findOnWindowsPath, orcaCommands, orcaInvocation, quoteCmdArg, type OrcaHost } from './cli.ts'
 import { basename } from './board.ts'
 
 const files = (...paths: string[]) => {
@@ -192,4 +192,14 @@ test('basename handles Windows and POSIX worktree paths', () => {
   assert.equal(basename('C:\\Users\\me\\toolbox'), 'toolbox')
   assert.equal(basename('C:\\Users\\me\\toolbox\\'), 'toolbox')
   assert.equal(basename('\\\\wsl$\\Ubuntu\\home\\me\\repo'), 'repo')
+})
+
+test('Windows gets APPDATA when the worker has none; other cases are left alone', () => {
+  const bare: OrcaHost = { platform: 'win32', env: { UserProfile: 'C:\\Users\\me' } }
+  const roaming = 'C:\\Users\\me\\AppData\\Roaming'
+  assert.deepEqual(extraEnv(bare), { APPDATA: roaming })
+  assert.deepEqual(extraEnv(bare, { ELECTRON_RUN_AS_NODE: '1' }), { APPDATA: roaming, ELECTRON_RUN_AS_NODE: '1' })
+  assert.equal(extraEnv({ platform: 'win32', env: { USERPROFILE: 'C:\\Users\\me', AppData: 'D:\\Roaming' } }), undefined)
+  assert.equal(extraEnv({ platform: 'win32', env: {} }), undefined)
+  assert.equal(extraEnv({ platform: 'darwin', env: { HOME: '/Users/me' } }), undefined)
 })
