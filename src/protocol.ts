@@ -9,6 +9,47 @@ export type Column = {
   collapsed?: boolean
 }
 
+/** One thing the judge checked: a criterion, whether the work meets it, and what it saw. */
+export type JudgeCriterion = { criterion: string; pass: boolean; evidence: string }
+
+/** Something the judge says must be fixed, with the evidence it found. */
+export type JudgeFinding = { title: string; evidence: string; file: string | null; line: number | null }
+
+export type JudgeVerdict = {
+  /** `needs-human`: the judge could not tell, and says so instead of guessing. */
+  verdict: 'pass' | 'must-fix' | 'needs-human'
+  summary: string
+  criteria: JudgeCriterion[]
+  mustFix: JudgeFinding[]
+}
+
+/** What the judge was not shown, or was shown with a caveat. */
+export type JudgeNote = 'no-git' | 'diff-cut' | 'shared-folder' | 'last-commit' | 'no-goal'
+
+/**
+ * The last review of a chat's work by the judge: a second Claude that can only read the chat's
+ * folder. It runs when you ask (or, with the setting on, when a checked chat with a goal finishes)
+ * and never sends anything to the chat: its findings are offered as a draft in the reply box.
+ */
+export type JudgeState = {
+  state: 'running' | 'done' | 'failed'
+  /** When the run started. */
+  at: number
+  verdict?: JudgeVerdict
+  /** The reply the verdict suggests (what must be fixed); null when there is nothing to send. */
+  draft?: string | null
+  /** You sent a reply after this verdict (the draft or your own words): the draft is used up. */
+  used?: boolean
+  costUsd?: number | null
+  ms?: number
+  /** Why the run failed: `interrupted`, `nothing`, or the reason the judge or the program gave. */
+  error?: string
+  notes?: JudgeNote[]
+}
+
+/** How you used the replies the judge drafted for a chat. */
+export type DraftTally = { asIs: number; edited: number; dropped: number }
+
 /** What the board remembers about one chat (one Orca terminal tab running an agent). */
 export type StoredCard = {
   /** Orca tab id of the chat. */
@@ -32,6 +73,14 @@ export type StoredCard = {
   unseenAt?: number | null
   /** You checked this chat: when its agent finishes unseen, the panel opens its reply box by itself. */
   watch?: boolean
+  /** What this chat's work must achieve, in your words: what the judge checks it against. */
+  goal?: string
+  /** The commit the chat's folder was at when the goal was written: the judge is shown what changed since. */
+  goalBase?: string | null
+  /** You sent this goal to the chat from the board: its reply field no longer offers it. Cleared when the goal's words change. */
+  goalSent?: boolean
+  judge?: JudgeState
+  drafts?: DraftTally
   addedAt: number
 }
 
@@ -86,7 +135,7 @@ export type MonitorInfo = {
   label: string | null
 }
 
-export type CardPatch = { key: string; label?: string; note?: string; watch?: boolean }
+export type CardPatch = { key: string; label?: string; note?: string; watch?: boolean; goal?: string; goalSent?: boolean }
 
 declare module 'orca' {
   interface PluginRequests {
@@ -139,6 +188,14 @@ declare module 'orca' {
      */
     'chat.archive': { input: { key: string }; output: { ok: boolean; error: 'closed' | 'chat-tab' | string | null } }
     'chat.reopen': { input: { key: string }; output: { ok: boolean; error: 'open' | 'unsupported' | string | null } }
+    /**
+     * Starts a review of the chat's work by the judge. Answers at once (a review takes longer than
+     * a panel waits); the result arrives on the card (`judge`) with a board update.
+     * `busy`: another review is running. `no-folder`: the chat's folder is not on this machine.
+     */
+    'judge.run': { input: { key: string }; output: { ok: boolean; error: 'closed' | 'busy' | 'no-folder' | string | null } }
+    /** How you used the reply the judge drafted: sent as it was, sent after editing, or not used. */
+    'judge.tally': { input: { key: string; how: keyof DraftTally }; output: null }
     /** One piece (base64, in order) of a picture attached in the reply box; kept in memory until Send. */
     'attach.put': { input: { id: string; type: string; data: string }; output: { result: 'ok' | 'type' | 'size' | 'count' } }
     /** Forgets a picture that was attached and not sent. */

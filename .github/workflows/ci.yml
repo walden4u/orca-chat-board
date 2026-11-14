@@ -20,4 +20,4 @@ jobs:
       - name: Type-check
         run: npx -y -p typescript@5.6.3 tsc -p tsconfig.ci.json
       - name: Tests that need no Orca host
-        run: node --experimental-strip-types --no-warnings --import ./ci/register.mjs --test src/cli.test.ts src/monitor.test.ts
+        run: node --experimental-strip-types --no-warnings --import ./ci/register.mjs --test src/cli.test.ts src/monitor.test.ts src/judge.test.ts src/tools.test.ts

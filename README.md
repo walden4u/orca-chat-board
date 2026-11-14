@@ -12,6 +12,7 @@ A kanban of your **agent chats**: the Claude, Codex, Cursor, Gemini and other ag
 > - it can follow Orca's Workspace Board in both directions;
 > - a reply box on every card, to read a chat's last exchange and answer it, images included, without leaving the board;
 > - checked chats, whose reply box opens by itself when they finish, and which can turn pink while they wait for your answer;
+> - a review of a chat's work by a second, read-only Claude, whose findings become a draft reply;
 > - a button on the card that archives a chat by closing its tab in Orca;
 > - a way to open an archived Claude chat again after Orca restarts;
 > - a Korean UI.
@@ -24,6 +25,7 @@ A kanban of your **agent chats**: the Claude, Codex, Cursor, Gemini and other ag
 - [Using the board](#using-the-board)
 - [Reply to a chat](#reply-to-a-chat)
 - [Checked chats](#checked-chats)
+- [Review a chat's work](#review-a-chats-work)
 - [The archive, and continuing a chat](#the-archive-and-continuing-a-chat)
 - [Sync with the Workspace Board](#sync-with-the-workspace-board)
 - [Settings](#settings)
@@ -92,9 +94,10 @@ Every tab that runs an agent is one card: terminal tabs, and Orca's chat tabs on
 | See what a chat was about | Hover its card for a moment. |
 | Have a chat come to you when it finishes | Click the box at the top left of its card. See [Checked chats](#checked-chats). |
 | Move a chat | Drag its card to another column, or up and down within a column. |
-| Rename a chat or add a note | Click ✎ on the card. Enter saves, Shift+Enter starts a new line in the note. The name is the chat's Orca tab name. |
+| Rename a chat, add a note or a goal | Click ✎ on the card. Enter saves, Shift+Enter starts a new line in the note and the goal. The name is the chat's Orca tab name. The goal is what a [review](#review-a-chats-work) checks the work against. |
 | Find a chat | Type in the filter box. It matches title, note, workspace and agent. |
 | Update the board now | Click ⟳. |
+| Have a chat's work checked before you answer | Click the card, then **Review** in the reply box. See [Review a chat's work](#review-a-chats-work). |
 | See at a glance which chats wait for your answer | Check them and turn on the pink setting. See [Pink: chats that wait for your answer](#pink-chats-that-wait-for-your-answer). |
 | Put a chat away | Hover its card, click ▾, then click the red question. See [The archive](#the-archive-and-continuing-a-chat). |
 | Continue a chat that was closed | Click **Archive N** in the toolbar. See [The archive](#the-archive-and-continuing-a-chat). |
@@ -133,6 +136,7 @@ Click a card to open its reply box. It shows your last message and the agent's w
 | Use the prompt the agent suggests | Press Tab in the empty field. |
 | Attach an image | Paste it into the field, or drop image files on the box. |
 | Go to the chat itself | Click ↗ in the box. |
+| Have the work checked | Click **Review**. See [Review a chat's work](#review-a-chats-work). |
 | Close the box | ✕, Escape, or a click outside it. What you typed is kept for that chat until the panel reloads. |
 
 - **Send** types your text into that chat's terminal as your next prompt. The box closes and a line under the toolbar confirms it.
@@ -182,6 +186,54 @@ Whether you have already looked at the chat does not matter. A chat you read an 
 **It is not the reply queue.** Which reply box opens next still depends on what you have not seen yet (see above). Pink only colours the board; it opens nothing.
 
 A chat with no status icon (Orca has not reported a status for it, see [Limitations](#limitations)) is never pink.
+
+## Review a chat's work
+
+The **Review** button in the reply box has a second Claude, the judge, check what the chat's agent did. The judge can only read the chat's folder, and it did not see how the work was done: it reads the result, not the agent's account of it. Nothing is sent to the chat. What the judge finds is shown to you, and a reply is drafted from it that you send, change or leave.
+
+### How to use it
+
+Everything happens in the chat's box, the one a click on the card opens. Its field always holds the next thing to send, and the line above it says what that is.
+
+1. Write a **goal** on the card (✎) and save: what must be true when this work is done, best as a numbered list. The chat's box opens by itself with the goal in its field.
+2. Press **Enter**. The goal goes to the agent and it starts. (A goal on the card tells the agent nothing by itself: it is what a review checks against. If you gave the agent the task some other way, type over the goal or clear the field.)
+3. When the agent has finished, click the card and press **Review**. A small change takes well under a minute. You can close the box meanwhile; the result is kept on the card.
+4. The **scorecard** appears under the exchange and the goal: the verdict, each criterion with ✓ or ✗ and what the judge saw, what must be fixed with file and line, the time and the cost.
+5. When something must be fixed, the **reply drafted from it is in the field**. Press Enter to send it as it is, change it first, or type your own over it. The draft ends by telling the agent to check each point itself and, for one that is wrong, to change nothing and say why.
+6. Repeat 3 to 5 until the verdict is "Everything asked for is met".
+
+What is put in the field for you is selected, so typing replaces it. It is never put over something you typed, and nothing is sent until you press Enter or Send.
+
+You can also review without a goal: the work is then checked against your last prompt in that chat only, and the scorecard says so.
+
+### What the judge is given
+
+- The card's goal and your last prompt in that chat.
+- The agent's last message, as claims to verify.
+- What changed in the folder, from git: everything since the commit the folder was at when you first wrote the goal. With no such starting point it gets what is not committed yet, and when nothing is uncommitted, the last commit. A long diff is cut and the judge reads the files for the rest. In a folder without git it gets no diff and finds the relevant files itself.
+- The folder, to read and search. It cannot run commands, change files, or read outside the folder.
+
+It is not given the conversation. The goal's starting point is set when a card without a goal gets one; rewording the goal keeps it, clearing the goal drops it.
+
+### The verdict
+
+| Verdict | Meaning | A reply is drafted |
+|---|---|---|
+| Everything asked for is met | Every criterion passed. | no |
+| N things to fix | A criterion is not met, something that worked is broken, or the agent claimed something the files do not show. | yes |
+| The judge could not tell | The criteria are ambiguous, or the answer lies outside the folder. | no |
+
+A review of an earlier turn stays readable on the card, marked as such; its draft is no longer offered.
+
+**A judge can be wrong.** In the check written up in [`docs/auto-reply-research.md`](docs/auto-reply-research.md) (in Korean) it found all 42 planted problems and passed 5 of 6 correct pieces of work; the sixth it faulted, by reading a criterion more strictly than it was meant. That is why its reply is a draft and is never sent by itself. The board counts what you do with the drafts of each chat (sent as they were, edited, not used), and the line under the scorecard shows the count: it is the measure of how far that judge can be trusted with your kind of work.
+
+### Reviewing by itself
+
+With the setting **Review when a turn ends** on (off by default), a chat that is **checked** and **has a goal** is reviewed as soon as its agent finishes a turn, so the scorecard and the draft are there when its reply box opens. It does not run after a turn that was interrupted or failed, or when the agent asks a question or needs permission: those are yours to answer. The Review button works either way.
+
+### What it costs
+
+A review is a run of Claude Code under your login, on the same usage as your chats. With Sonnet it took about 12 seconds and 3 cents for a small change, and 32 seconds and 16 cents for a large diff in this repository. One review runs at a time, and each is capped at 5 minutes and half a dollar.
 
 ## The archive, and continuing a chat
 
@@ -241,6 +293,7 @@ Under **Settings → Plugins → Chat Board**:
 | Check Orca automatically | on | The panel asks Orca what changed while it is on screen. See below. |
 | Show the chat in Orca with its reply box | off | Orca switches to a chat's tab when its reply box opens. See [Reply to a chat](#reply-to-a-chat). |
 | Pink for checked chats that wait for an answer | off | Checked chats whose agent has stopped are drawn pink. See [Pink](#pink-chats-that-wait-for-your-answer). |
+| Review when a turn ends | off | A checked chat with a goal is reviewed when its agent finishes a turn. See [Review a chat's work](#reviewing-by-itself). |
 | Show agent logo | on | The agent's logo, or its name, on each card. |
 | Show workspace | on | The workspace's name on each card. |
 | Show agent status icon | on | Working, waiting, done, interrupted, needs permission. |
@@ -286,6 +339,10 @@ Opening the panel always reads the board afresh, and ⟳ works either way.
 | A card did not move after you changed a status in Orca | Wait 10 seconds or click ⟳. |
 | A checked chat is not pink | Check the three conditions in [Pink](#pink-chats-that-wait-for-your-answer): the setting is on (it is off by default), the box on the card is checked, and the agent is not working. A card with no status icon is never pink. After changing the setting, click ⟳ if the board does not follow. |
 | A card you archived with ▾ is back on the board | Its tab is still open in Orca, so the close did not go through. Look for `archive failed` in `orca plugin logs local.chat-board`. |
+| Review says the folder is not on this machine | The chat's workspace is on a remote host (SSH, WSL). A review runs Claude Code here, in the chat's folder, so it cannot review those. |
+| A review failed | The scorecard says why. "claude was not found": Claude Code must be installed where the worker finds it on PATH. `error_max_budget_usd`: the review hit its spending cap, the change is too large to review whole. "Nothing to review against": write a goal or send the chat a prompt first. The log (`orca plugin logs local.chat-board`) has a line starting with `judge` for every review. |
+| A review was cut off | The plugin was reloaded while the judge ran, for example because a file in its development folder changed. Run it again. |
+| A finding in a review is wrong | Leave it out of the reply. Or send the draft as it is: it tells the agent to change nothing for a finding that is wrong and to say why. |
 | A card has no status icon | Orca has not reported a status for that session yet. See [Limitations](#limitations). |
 
 ## Permissions
@@ -294,14 +351,14 @@ Orca asks you to approve these when you load the plugin. Here is what each one i
 
 | Permission | What the plugin does with it |
 |---|---|
-| **Runs its own code** (Node worker) | Runs the Orca CLI commands listed below, because the plugin API alone sees only the focused workspace and cannot open, rename or write to tabs. Also the two file accesses listed below. |
-| `storage:own` | Saves the board: columns, card positions, notes, checks, agent status and monitors. All of it stays in the plugin's own folder. |
+| **Runs its own code** (Node worker) | Runs the Orca CLI commands listed below, because the plugin API alone sees only the focused workspace and cannot open, rename or write to tabs. For a review it also runs git and Claude Code. Also the file accesses listed below. |
+| `storage:own` | Saves the board: columns, card positions, notes, checks, goals, the last review of each chat and the count of its drafts, agent status and monitors. All of it stays in the plugin's own folder. |
 | `agent:read` | Agent status icons, the yellow "not seen yet" mark, and moving a Backlog card when you start a chat. |
 | `workspace:read` | Knows which tab you are looking at, for the "not seen yet" mark and the open-chat highlight, and refreshes the board when chats open or close. |
 | `settings:own` | The plugin's options in Orca's Settings. |
 | Hook `agent.tool.after` (observe only) | Detects loops and watchers. Orca hands this hook every tool call an agent makes. The plugin looks only at `ScheduleWakeup`, `CronCreate`/`CronDelete`, `Monitor` and `TaskStop`, keeping their timing and description, and drops every other call without storing it. The hook never blocks or changes a call. |
 
-### The CLI commands the worker runs
+### The commands the worker runs
 
 | Command | When | For |
 |---|---|---|
@@ -314,15 +371,20 @@ Orca asks you to approve these when you load the plugin. Here is what each one i
 | `orca terminal close --tab` | you click ▾ on a card, then confirm | Closing that chat's tab, which stops the agent in it. |
 | `orca agent launch`, then `orca terminal send` with `/resume` | you click ↻ Continue on an archived card | Starting Claude in that workspace with its list of conversations. |
 | `orca worktree list`, `orca worktree set --workspace-status` | the Workspace Board sync is on | Reading every workspace's status, and setting one when you drag a card. |
+| `git rev-parse`, `git status`, `git diff`, `git show`, `git cat-file` | you write a goal on a card, or a review starts | The commit a goal's work starts from, and what changed in the chat's folder since. Git only reads: it runs with `--no-optional-locks`, so it does not even refresh the index. |
+| `claude -p --restricted --tools Read,Grep,Glob …` | you click Review, or a checked chat with a goal finishes a turn with the setting on | The judge: Claude Code without a screen, in the chat's folder, with the three reading tools only, your settings files and hooks left out, and its session not saved. |
 
 ### Files outside the plugin's own folder
 
 - **Read:** Orca's profile database, read-only, for the ids and names of the workspace statuses, and only while the sync is on. See [how the status names are read](#how-the-status-names-are-read).
+- **Read:** the folder of a chat you review. Git reads it for what changed, and the judge reads and searches it. Nothing in it is changed.
 - **Written:** the images you attach in a reply box, as files in `orca-chat-board` under your temp folder, which the agent needs to read them.
 
 ### What stays where
 
-The plugin makes no network requests and sends nothing anywhere. Some of what Orca's CLI returns, such as a preview of each terminal's latest output and the agent's last message, prompt or tool input, is never stored by the plugin; it keeps only titles, agent type and status. The hover preview and the reply box read your last prompt and the agent's last reply from Orca when you ask, show them, and keep them for a few seconds in memory only. A terminal screen read for the reply box is shown and not stored. The plugin sends input to an agent only when you press Send or ↻ Continue, and only the text you typed, the images you attached, or `/resume`. It closes a tab only when you click ▾ on that chat's card and confirm.
+The plugin itself makes no network requests. A review is the one thing that sends something out, and it does so through Claude Code: the judge's task (your goal, your last prompt in that chat, the agent's last message, the diff) and the files the judge reads go to Anthropic, the same service and the same login your Claude chats in that folder already use. It happens when you click Review, and by itself only with the setting on, for a checked chat with a goal. The verdict is kept on the card.
+
+Some of what Orca's CLI returns, such as a preview of each terminal's latest output and the agent's last message, prompt or tool input, is never stored by the plugin; it keeps only titles, agent type and status. The hover preview and the reply box read your last prompt and the agent's last reply from Orca when you ask, show them, and keep them for a few seconds in memory only. A terminal screen read for the reply box is shown and not stored. The plugin sends input to an agent only when you press Send or ↻ Continue, and only the text you typed, the images you attached, or `/resume`. It closes a tab only when you click ▾ on that chat's card and confirm.
 
 ## Limitations
 
@@ -333,6 +395,7 @@ The plugin makes no network requests and sends nothing anywhere. Some of what Or
 - Monitoring is recognised from tool calls, because Orca does not expose its own monitoring state to plugins. Only Claude Code's tool names are known so far. Orca does not run this hook for agents on SSH or WSL hosts.
 - **Chats Orca lost track of.** A chat shows no status icon until Orca reports one for it. Some sessions, such as ones started before Orca's status hooks were set up or ones that were open when Orca restarted, never report. For those the plugin reads the state off the terminal instead: when a terminal has fresh output long after Orca's record of a finished turn, it reads that terminal's screen once, and a Claude Code spinner line or an "esc to interrupt" hint there means a turn is running; the turn is over when the terminal goes quiet and the screen no longer shows it. This runs with the automatic check or on ⟳, lags a few seconds behind, misses turns shorter than that, and knows only "working" and "done". Other agents' screens are not recognised yet.
 - Attached images, the suggested prompt and ↻ Continue rest on how Claude Code behaves in a terminal. Other agents get the image's path as text and have no suggestion or Continue button.
+- **Reviews.** The judge is Claude Code, so it must be installed and logged in on this machine, also to review the work of another agent's chat. It reads; it cannot run the tests or the program. It works on folders on this machine only. When several chats work in one folder it cannot tell whose change is whose, and says so. It sees the last exchange and the changes, not the conversation. One review runs at a time.
 - Upstream is tested on macOS. This fork is used on Windows 10 with Orca 1.4.255. On Linux the worker uses the CLI launcher Orca ships (`orca-ide`), but this has not been tried yet. If the board stays empty there, please open an issue.
 
 ## How it works
@@ -343,6 +406,7 @@ The plugin makes no network requests and sends nothing anywhere. Some of what Or
 - `src/sync.ts` holds the rules of the Workspace Board sync, and `src/profile.ts` reads the status names from Orca's profile.
 - `src/monitor.ts` recognises loops and watchers from tool calls and decides when one has lost its signal.
 - `src/screen.ts` reads a busy turn and the suggested prompt off a terminal's screen, and `src/attach.ts` keeps and saves the images of a reply.
+- `src/judge.ts` holds what the judge is asked, how its answer is read and the reply drafted from it. `src/tools.ts` starts Claude Code and git. Why the judge is set up the way it is, and how it was checked, is in [`docs/auto-reply-research.md`](docs/auto-reply-research.md).
 - `panel/` is the HTML panel. It uses native drag & drop, and holds the board (`index.ts`), the reply box (`reply.ts`), the hover preview (`preview.ts`), the strings (`i18n.ts`), status icons (`icons.ts`) and agent logos (`logos.ts`).
 
 ## Development

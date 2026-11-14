@@ -190,6 +190,7 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 
 .edit { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
 .edit-actions { display: flex; gap: 4px; justify-content: flex-end; }
+.edit-hint { font-size: 11px; line-height: 1.35; color: var(--orca-muted-foreground); }
 .primary { background: var(--orca-primary); color: var(--orca-primary-foreground);
   border: none; border-radius: 4px; padding: 2px 8px; }
 
@@ -243,6 +244,23 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .reply-thumb button { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; padding: 0; border: none;
   border-radius: 50%; font-size: 9px; line-height: 16px; text-align: center;
   background: var(--orca-popover); color: var(--orca-popover-foreground); }
+/* The review of the chat's work, under the exchange: verdict, criteria with evidence, what to fix. */
+.reply-exchange { display: flex; flex-direction: column; gap: 10px; }
+.reply-judge { display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed var(--orca-border); padding-top: 8px; }
+.reply-judge[hidden] { display: none; }
+.reply-goal { display: flex; flex-direction: column; gap: 4px; border-top: 1px dashed var(--orca-border); padding-top: 8px; }
+.reply-goal[hidden] { display: none; }
+.reply-advice { color: var(--orca-foreground); }
+.reply-advice[hidden] { display: none; }
+.judge-verdict { font-weight: 600; }
+.judge-verdict.pass { color: #2fa36b; }
+.judge-verdict.must-fix { color: var(--orca-destructive); }
+.judge-list { display: flex; flex-direction: column; gap: 2px; }
+.judge-item { display: flex; gap: 6px; line-height: 1.4; word-break: break-word; }
+.judge-item.pass .judge-mark { color: #2fa36b; }
+.judge-item.fail { color: var(--orca-destructive); }
+.judge-mark { flex: none; width: 1em; font-weight: 700; }
+.judge-evidence { margin: 0 0 4px 1.4em; color: var(--orca-muted-foreground); white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
 .reply-waiting { flex: none; color: var(--orca-muted-foreground); white-space: nowrap; }
 .reply-next { border-color: var(--orca-border); padding: 3px 10px; }
 .reply-row .primary { padding: 3px 14px; }

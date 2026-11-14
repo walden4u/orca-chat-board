@@ -1,6 +1,7 @@
 // Reply box: a card's whole last exchange (your prompt, the agent's reply) with a field to answer
 // it. Send types your text into that chat's terminal as the next prompt; nothing is sent before.
 // The box lives outside the board, so the board's redraws never touch what you are typing.
+import type { DraftTally, JudgeState } from '../src/protocol.ts'
 import { t } from './i18n.ts'
 import { loadPreview, plain } from './preview.ts'
 
@@ -8,6 +9,14 @@ export type ReplyTarget = {
   key: string
   title: string
   workspace: string
+  /** The card's goal, and whether you already sent it to this chat from the board. */
+  goal: string | null
+  goalSent: boolean
+  /** The last review of this chat's work, if any, and how its drafts were used so far. */
+  judge: JudgeState | null
+  tally: DraftTally | null
+  /** When the agent's current state began: a review older than that is of an earlier turn. */
+  turnAt: number | null
   /** An Orca chat tab: it can be read, but Orca has no way to send to one. */
   chatTab: boolean
   working: boolean
@@ -63,8 +72,16 @@ const drafts = new Map<string, string>()
  */
 const sent = new Map<string, { text: string; at: number }>()
 
+/** Whether a reply still carries a finding of the drafted one: the draft was edited, not replaced. */
+const carries = (text: string, draft: string) => draft.split('\n').some((line) => /^\d+\. /.test(line) && text.includes(line.trim()))
+
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-let current: { key: string; shut: () => void; setWaiting: (n: number) => void } | null = null
+let current: {
+  key: string
+  shut: () => void
+  setWaiting: (n: number) => void
+  setJudge: (judge: JudgeState | null, tally: DraftTally | null) => void
+} | null = null
 
 /** The chat whose box is open, if any. */
 export const replyKey = (): string | null => current?.key ?? null
@@ -77,6 +94,50 @@ export function closeReply(): void {
 /** The number of chats waiting behind the open box changed. */
 export function setReplyWaiting(n: number): void {
   current?.setWaiting(n)
+}
+
+/** The review of the chat whose box is open changed (it started, or its result is in). */
+export function setReplyJudge(key: string, judge: JudgeState | null, tally: DraftTally | null): void {
+  if (current?.key === key) current.setJudge(judge, tally)
+}
+
+/** The scorecard of a review: what the judge checked, what it says must be fixed, and what it was not shown. */
+function scorecard(judge: JudgeState, tally: DraftTally | null, stale: boolean, offered: boolean): HTMLElement[] {
+  const line = (cls: string, text: string) => node('div', cls, text)
+  if (judge.state === 'running') return [line('preview-who', t.judgeTitle), line('reply-hint', t.judgeRunningSince(clock(judge.at)))]
+  if (judge.state === 'failed') {
+    const why = judge.error === 'interrupted' ? t.judgeInterrupted : judge.error === 'nothing' ? t.judgeNothing : t.judgeFailed(judge.error ?? '')
+    return [line('preview-who', t.judgeTitle), line('reply-hint', why)]
+  }
+  const v = judge.verdict
+  if (!v) return []
+  const out: HTMLElement[] = []
+  const met = v.criteria.filter((c) => c.pass).length
+  const cost = typeof judge.costUsd === 'number' ? judge.costUsd.toFixed(2) : null
+  out.push(line('preview-who', `${t.judgeTitle} · ${clock(judge.at)} · ${t.judgeMeta(met, v.criteria.length, Math.round((judge.ms ?? 0) / 1000), cost)}`))
+  out.push(line(`judge-verdict ${v.verdict}`, v.verdict === 'pass' ? t.judgePass : v.verdict === 'must-fix' ? t.judgeMustFix(v.mustFix.length) : t.judgeNeedsHuman))
+  if (stale) out.push(line('reply-hint', t.judgeStale))
+  if (v.summary) out.push(line('preview-text', v.summary))
+  for (const note of judge.notes ?? []) out.push(line('reply-hint', t.judgeNotes[note] ?? note))
+  const list = node('div', 'judge-list')
+  for (const c of v.criteria) {
+    const row = node('div', `judge-item ${c.pass ? 'pass' : 'fail'}`)
+    row.append(node('span', 'judge-mark', c.pass ? '✓' : '✗'), node('span', 'judge-what', c.criterion))
+    list.append(row)
+    if (c.evidence) list.append(line('judge-evidence', c.evidence))
+  }
+  if (v.criteria.length) out.push(list)
+  if (v.mustFix.length) {
+    const fixes = node('div', 'judge-list')
+    v.mustFix.forEach((f, i) => {
+      const where = f.file ? ` (${f.file}${f.line ? `:${f.line}` : ''})` : ''
+      fixes.append(line('judge-item fail', `${i + 1}. ${f.title}${where}`), line('judge-evidence', f.evidence))
+    })
+    out.push(line('preview-who', t.judgeFixes), fixes)
+  }
+  if (offered) out.push(line('reply-hint', t.judgeDraft))
+  if (tally && tally.asIs + tally.edited + tally.dropped > 0) out.push(line('reply-hint', t.judgeTally(tally.asIs, tally.edited, tally.dropped)))
+  return out
 }
 
 function node<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -115,12 +176,25 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   if (target.workspace) head.append(node('span', 'chip ws', target.workspace))
   head.append(waiting, toChat, shut)
 
+  // The exchange, then the review of it: two parts, so that loading one never wipes the other.
   const body = node('div', 'reply-body')
-  body.append(node('div', 'preview-text preview-empty', t.replyLoading))
+  const exchange = node('div', 'reply-exchange')
+  exchange.append(node('div', 'preview-text preview-empty', t.replyLoading))
+  const judgeBox = node('div', 'reply-judge')
+  judgeBox.hidden = true
+  // The goal is shown where the work is read and reviewed: it is what the review holds the work against.
+  const goalBox = node('div', 'reply-goal')
+  if (target.goal) goalBox.append(node('div', 'preview-who', t.goal), node('div', 'preview-text', target.goal))
+  goalBox.hidden = !target.goal
+  body.append(exchange, goalBox, judgeBox)
 
   const foot = node('div', 'reply-foot')
   const hint = target.chatTab ? t.replyChatTab : target.blocked ? t.replyBlocked : target.working ? t.replyWorking : ''
   if (hint) foot.append(node('div', 'reply-hint', hint))
+  /** The one next step, in words: what is in the field and what Enter does, or that a review is due. */
+  const advice = node('div', 'reply-hint reply-advice')
+  advice.hidden = true
+  foot.append(advice)
   const input = node('textarea', 'reply-input')
   input.rows = 3
   input.placeholder = t.replyPlaceholder
@@ -133,10 +207,12 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   status.setAttribute('role', 'status')
   const next = node('button', 'ghost reply-next', t.next)
   next.title = t.nextHint
+  const review = node('button', 'ghost reply-next', t.judge)
+  review.title = t.judgeHint
   const send = node('button', 'primary', t.send)
   send.disabled = readOnly
   const row = node('div', 'reply-row')
-  row.append(status, next, send)
+  row.append(status, review, next, send)
   foot.append(shelf, input, row)
 
   dialog.append(head, body, foot)
@@ -148,6 +224,64 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     next.hidden = n <= 0
   }
   setWaiting(target.waiting)
+
+  // The review of this chat's work and the reply drafted from it.
+  let judge: JudgeState | null = null
+  let draft: string | null = null
+  /** What waits in the agent's own input (its suggestion for your next prompt). */
+  let suggestion: string | null = null
+  const offer = () => {
+    input.placeholder = draft ? t.judgeDraftHint : suggestion ? t.replySuggestion(suggestion) : t.replyPlaceholder
+  }
+  // What goes out next is put in the empty field for you: the goal while the agent has not been
+  // given it, then the reply drafted from each review. It is selected, so typing replaces it and
+  // Enter sends it. Nothing goes out unless you send it.
+  let filled = ''
+  const goalPrompt = target.goal && !target.goalSent && !target.working && !readOnly ? t.goalPrompt(target.goal) : null
+  /** A review of an earlier turn is still worth reading, but its draft answers that turn, not this one. */
+  const isStale = () => !!judge && judge.state === 'done' && target.turnAt !== null && judge.at < target.turnAt
+  const advise = () => {
+    const untouched = !!filled && input.value === filled
+    advice.textContent = readOnly
+      ? ''
+      : untouched && filled === draft
+        ? t.draftInField
+        : untouched && filled === goalPrompt
+          ? t.goalInField
+          : target.goal && target.goalSent && !target.working && judge?.state !== 'running' && (!judge || isStale())
+            ? t.judgeDue
+            : ''
+    advice.hidden = !advice.textContent
+  }
+  const fill = () => {
+    // The goal is offered until a review has spoken: from then on its draft is the next word.
+    const text = draft ?? (!judge || judge.state === 'failed' ? goalPrompt : null)
+    // Never over what you typed: into an empty field, or over an earlier fill you left as it was.
+    if (text && (!input.value || input.value === filled)) {
+      input.value = text
+      filled = text
+      // Room to read what is about to go out, within reason.
+      input.rows = Math.min(10, Math.max(3, text.split('\n').length + 1))
+      if (document.activeElement === input) input.select()
+    }
+    advise()
+  }
+  input.addEventListener('focus', () => {
+    if (filled && input.value === filled) input.select()
+  })
+  input.addEventListener('input', advise)
+  const showJudge = (nextJudge: JudgeState | null, tally: DraftTally | null) => {
+    judge = nextJudge
+    const running = judge?.state === 'running'
+    const stale = isStale()
+    draft = !readOnly && !stale && judge?.state === 'done' && judge.draft && !judge.used ? judge.draft : null
+    review.disabled = running
+    review.textContent = running ? t.judgeRunning : t.judge
+    judgeBox.replaceChildren(...(judge ? scorecard(judge, tally, stale, !!draft) : []))
+    judgeBox.hidden = !judge
+    offer()
+    fill()
+  }
 
   let open = true
   let busy = false
@@ -217,7 +351,8 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     if (!open) return
     open = false
     for (const p of [...pictures]) removePicture(p)
-    if (input.value.trim()) drafts.set(target.key, input.value)
+    // What you typed is kept for this chat; what was only put there for you is offered afresh next time.
+    if (input.value.trim() && input.value !== filled) drafts.set(target.key, input.value)
     else drafts.delete(target.key)
     document.removeEventListener('keydown', onKey, true)
     backdrop.remove()
@@ -229,7 +364,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     shutBox()
     then()
   }
-  current = { key: target.key, shut: shutBox, setWaiting }
+  current = { key: target.key, shut: shutBox, setWaiting, setJudge: showJudge }
 
   const submit = async () => {
     const text = input.value.trim()
@@ -249,6 +384,15 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     if (result.ok) {
       const note = pictures.length ? `${text}${text ? '\n' : ''}${t.attachSent(pictures.length)}` : text
       sent.set(target.key, { text: note, at: Date.now() })
+      // A drafted reply was on offer: note what became of it (sent as it was, edited, or not used).
+      if (draft && judge) {
+        const how = text === draft.trim() ? 'asIs' : carries(text, draft) ? 'edited' : 'dropped'
+        void orca.plugin.request('judge.tally', { key: target.key, how }).catch(() => undefined)
+      }
+      // The goal went to the chat: the field stops offering it.
+      if (target.goal && !target.goalSent && text.includes(target.goal)) {
+        void orca.plugin.request('card.update', { key: target.key, goalSent: true }).catch(() => undefined)
+      }
       // The worker has the pictures now: nothing to forget there.
       for (const p of [...pictures]) removePicture(p, false)
       input.value = ''
@@ -308,23 +452,49 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   backdrop.onmousedown = (e) => {
     if (e.target === backdrop) leave(handlers.onClosed)
   }
-  // What waits in the agent's own input (its suggestion for your next prompt): shown dimmed in the
-  // empty field, and Tab takes it, as in the agent's terminal.
-  let suggestion: string | null = null
+  // A review: asked for here, done by the worker. It answers at once; the result comes with a
+  // board update (setReplyJudge), also when the box was closed and opened again meanwhile.
+  // Asked each time: the review's state can change while a request is on its way.
+  const reviewing = () => judge?.state === 'running'
+  review.onclick = async () => {
+    if (busy || reviewing()) return
+    status.textContent = ''
+    review.disabled = true
+    let result: { ok: boolean; error: string | null }
+    try {
+      result = await orca.plugin.request('judge.run', { key: target.key })
+    } catch (err) {
+      result = { ok: false, error: (err as Error).message }
+    }
+    if (!open) return
+    if (result.ok) {
+      if (!reviewing()) showJudge({ state: 'running', at: Date.now() }, null)
+      return
+    }
+    review.disabled = false
+    status.textContent =
+      result.error === 'busy' ? t.judgeBusy : result.error === 'no-folder' ? t.judgeNoFolder : result.error === 'closed' ? t.chatClosed : t.judgeFailed(result.error ?? '')
+  }
+  // In a field you emptied, Tab brings back the reply drafted from the review, or else takes what
+  // waits in the agent's own input (its suggestion for your next prompt), shown dimmed.
   input.onkeydown = (e) => {
-    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && suggestion && !input.value && !readOnly) {
+    const again = draft ?? suggestion
+    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && again && !input.value && !readOnly) {
       e.preventDefault()
-      input.value = suggestion
+      input.value = again
+      advise()
       return
     }
     // Enter sends, Shift+Enter adds a line. While an IME composes (Korean, Japanese…), Enter
     // belongs to the IME: it confirms the word and must not send (keyCode 229 in older engines).
-    if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return
+    // A held key is not a decision: the Enter that saved a goal and opened this box must not also send.
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229 || e.repeat) return
     e.preventDefault()
     void submit()
   }
   document.addEventListener('keydown', onKey, true)
 
+  showJudge(target.judge, target.tally)
   document.body.append(backdrop)
   if (!readOnly && !target.auto) setTimeout(() => input.focus(), 0)
   let engaged = false
@@ -343,18 +513,18 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       if (!open) return
       if (data.suggestion && !readOnly) {
         suggestion = data.suggestion
-        input.placeholder = t.replySuggestion(suggestion)
+        offer()
       }
-      body.replaceChildren()
+      exchange.replaceChildren()
       const when = data.at ? ` · ${clock(data.at)}` : ''
-      if (data.prompt) body.append(section(t.previewYou, plain(data.prompt), 'you'))
-      if (data.message) body.append(section(t.previewAgent + when, plain(data.message), 'agent'))
-      if (!data.prompt && !data.message && !data.screen) body.append(node('div', 'preview-text preview-empty', t.previewEmpty))
+      if (data.prompt) exchange.append(section(t.previewYou, plain(data.prompt), 'you'))
+      if (data.message) exchange.append(section(t.previewAgent + when, plain(data.message), 'agent'))
+      if (!data.prompt && !data.message && !data.screen) exchange.append(node('div', 'preview-text preview-empty', t.previewEmpty))
       // Orca's record is behind this chat's terminal: what is above is old, the screen is now.
       if (data.screen) {
         const now = node('div', 'reply-screen')
         now.append(node('div', 'preview-who', t.replyScreen), node('div', 'reply-hint', t.replyScreenNote), node('pre', '', data.screen))
-        body.append(now)
+        exchange.append(now)
         sent.delete(target.key)
         setTimeout(() => (body.scrollTop = body.scrollHeight), 0)
         return
@@ -362,12 +532,12 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       // Sent from here after Orca's last record of this chat: show it, and say the record is behind.
       const mine = sent.get(target.key)
       if (mine && (data.at ?? 0) < mine.at) {
-        body.append(section(`${t.previewYou} · ${clock(mine.at)}`, mine.text, 'you'), node('div', 'reply-hint', t.replySentNote))
+        exchange.append(section(`${t.previewYou} · ${clock(mine.at)}`, mine.text, 'you'), node('div', 'reply-hint', t.replySentNote))
         body.scrollTop = body.scrollHeight
       } else sent.delete(target.key)
     },
     () => {
-      if (open) body.replaceChildren(node('div', 'preview-text preview-empty', t.previewEmpty))
+      if (open) exchange.replaceChildren(node('div', 'preview-text preview-empty', t.previewEmpty))
     }
   )
 }

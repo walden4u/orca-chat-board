@@ -4,6 +4,7 @@ declare module 'node:child_process' {
     file: string,
     args: readonly string[],
     options: {
+      cwd?: string
       maxBuffer?: number
       timeout?: number
       env?: Record<string, string | undefined>
@@ -11,7 +12,7 @@ declare module 'node:child_process' {
       windowsVerbatimArguments?: boolean
     },
     callback: (error: (Error & { code?: unknown }) | null, stdout: string, stderr: string) => void
-  ): unknown
+  ): { stdin?: { end(data?: string): void } | null }
 }
 
 declare module 'node:fs' {

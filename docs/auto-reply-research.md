@@ -1,0 +1,185 @@
+# 자동 답변 연구: 채점 에이전트를 믿어도 되는가
+
+2026년 11월 14일, Windows 10, Orca 1.4.255, Claude Code 2.1.325에서 확인한 내용입니다.
+
+## 결론
+
+- **따로 돌리는 채점 에이전트는 쓸 만합니다.** 문제를 하나씩 심은 사례 42개를 모두 잡았고, 정상 사례 6개 중 5개를 통과시켰습니다. 한 번에 약 12초, 약 0.03달러가 들었습니다.
+- **그래도 자동으로 보내게 하지는 않았습니다.** 채점자는 정상 코드 1건에 고칠 것이 있다고 했고, 54회 중 1회는 맞는 지적에 지나친 지적 하나를 덧붙였습니다. 이런 답장이 확인 없이 나가면 멀쩡한 코드를 고치게 됩니다.
+- **그래서 플러그인에는 "초안" 단계까지만 넣었습니다.** 채점 결과는 답장 창에 채점표와 답장 초안으로 나오고, 보내는 것은 지금처럼 직접 합니다. 초안을 그대로 보냈는지, 고쳤는지, 쓰지 않았는지를 카드마다 셉니다. 자동 전송은 이 수치가 쌓인 뒤에 정합니다.
+
+## 무엇을 물었나
+
+"대화가 끝날 때 보낼 답장을 어떻게 만들어야 결과물이 가장 좋아지는가, 에이전트를 따로 돌려 점수를 매기는 방식은 어떤가"가 질문이었습니다. 답장이 결과물을 좋게 만들려면 일한 에이전트가 모르던 참인 정보를 담아야 합니다. "계속하시오"나 추천 문구에는 그런 정보가 없습니다. 채점 에이전트는 작업 과정을 보지 않은 채 결과물만 읽으므로 그런 정보를 낼 수 있는 후보입니다. 다만 채점자도 틀릴 수 있으므로, 쓰기 전에 정답을 아는 문제로 채점자를 먼저 시험했습니다.
+
+채점자는 `src/judge.ts`에 있는 그대로입니다. Claude Code를 화면 없이 실행하되(`claude -p`), 읽기 도구 세 가지만 주고(`--restricted --tools Read,Grep,Glob`), 설정 파일과 훅을 읽지 않게 하고, 세션을 저장하지 않게 합니다. 목표, 이번 턴의 요청, 에이전트의 마지막 답, 바뀐 파일을 주고, 기준별 통과 여부와 증거, "반드시 고칠 것" 목록, 판정(통과 / 고칠 것 있음 / 사람 필요)을 JSON으로 받습니다.
+
+## 단계 0. 워커에서 실행할 수 있는가
+
+플러그인 워커 안에서 실제로 돌려 확인했습니다. 임시 확인 코드는 지웠습니다.
+
+| 확인한 것 | 결과 |
+|---|---|
+| 워커의 환경 변수 | 18개뿐. `PATH`, `USERPROFILE`, `TEMP`는 있고 `APPDATA`, `LOCALAPPDATA`, `HOME`은 없음. Orca나 Claude 관련 변수는 없음 |
+| 실행 파일 찾기 | `claude.cmd` 옆의 `claude.exe`와 `git.exe`를 찾음. `.cmd`를 거치면 긴 프롬프트와 JSON 인자가 깨지므로 `.exe`를 직접 실행 |
+| 로그인과 결과 형식 | 로그인된 상태로 실행됨. 정해 준 형식의 JSON 답이 `structured_output`에 담겨 나옴. 6.9초, 0.036달러 |
+| Orca에 에이전트로 잡히는가 | 잡히지 않음. 실행 전, 실행 중, 실행 후 모두 Orca의 에이전트 수가 5개로 같음 |
+| 금액 상한 | 아주 낮게(0.0001달러) 주면 종료 코드 1로 멈춤 |
+
+## 단계 1. 채점자 검증
+
+### 방법
+
+1. 이 플러그인의 순수 함수(`sync.ts`, `board.ts`, `monitor.ts`, `cli.ts`)에 문제를 하나씩 심은 후보 44개와 정상 사례 6개를 만들었습니다. 문제는 두 종류입니다: 동작을 바꾼 것(비교 뒤집기, 경계값, 잘못된 상수)과 필요한 동작을 빼 놓은 것.
+2. 후보마다 플러그인의 기존 테스트 56개를 돌렸습니다. 44개 중 20개만 테스트에 걸렸고 24개는 걸리지 않았습니다.
+3. **본 실험**은 테스트에 걸린 것만 썼습니다. 테스트가 정답 판별기이기 때문입니다. 20개 중 18개(바꾼 것 12, 빼 놓은 것 6)를 썼고 둘은 채점 전에 뺐습니다. 여기에 정상 사례 6개(손대지 않은 원본 3개, 동작이 같게 다시 쓴 것 3개)를 더해 24개입니다.
+4. 채점자에게는 테스트와 git 기록을 뺀 소스 복사본, 함수별 기준 목록(3~5항목), "기준대로 구현해 달라"는 요청, "모두 구현했고 빠진 것은 없다"는 에이전트의 답, 바뀐 파일 이름을 주었습니다. 에이전트의 답은 모든 사례에서 같습니다.
+5. 24개를 한 번씩 돌리고, 미리 정해 둔 6개는 한 번 더 돌렸습니다. 모델은 Sonnet(`claude-sonnet-5-5`), 노력 수준은 중간입니다.
+6. 판정 규칙은 실행 전에 정했습니다. 심은 문제를 "잡았다"는 판정이 "고칠 것 있음"이고, 그 문제가 어기는 기준을 미달로 표시했을 때입니다. 정상 사례는 판정이 "통과"가 아니면 잘못된 지적으로 셉니다.
+7. 통과 기준도 실행 전에 정했습니다: 놓친 결함 2개 이하, 놓친 미완성 1개 이하, 잘못된 지적 1개 이하.
+
+### 결과
+
+| | 결과 | 통과 기준 |
+|---|---|---|
+| 동작을 바꾼 문제 12개 | 12개 잡음 | 놓친 것 2개 이하 |
+| 빼 놓은 동작 6개 | 6개 잡음 | 놓친 것 1개 이하 |
+| 정상 사례 6개 | 5개 통과, 잘못된 지적 1개 | 잘못된 지적 1개 이하 |
+| 반복한 6개 | 6개 모두 처음과 같은 판정 | (기준 없음) |
+| 시간 | 중앙값 12초, 최대 16초 | |
+| 비용 | 30회에 1.00달러, 1회 0.033달러 | |
+
+통과 기준을 넘었습니다. 싼 모델이 통과했으므로 더 비싼 모델은 시험하지 않았습니다.
+
+### 잘못된 지적 1건과 지나친 지적 1건
+
+두 건 모두 자동 전송을 미룬 이유가 됩니다.
+
+- **정상 사례 `ok5`** (`cronEverySec`를 동작이 같게 다시 쓴 것). 채점자는 "필드가 6개 이상인 cron 식을 null로 처리하지 않는다"며 고칠 것이 있다고 했습니다. 코드에 대한 사실은 맞습니다. 원본도 똑같이 동작합니다. 제가 쓴 기준의 "그 밖의 모양이면 null"을 문자 그대로 넓게 읽은 것입니다. 기준이 모호하면 채점자는 엄격한 쪽으로 읽습니다. 같은 기준으로 채점한 다른 사례(`m2`)에서는 이 지적을 하지 않았습니다.
+- **`c1`의 반복 실행.** 심은 문제(따옴표로 감싼 PATH 항목)는 정확히 잡았지만, "확장자를 소문자로 바꾼다"는 지적을 하나 더 붙였습니다. 의도한 동작이고 Windows에서는 문제가 되지 않습니다. 첫 실행에는 없던 지적입니다.
+
+그 밖에 심은 문제 하나 때문에 다른 기준도 함께 어겨지는 경우가 있었고(`s1`, `b2`, `s4`), 채점자는 그 기준들도 미달로 표시했습니다. 이것은 맞는 표시입니다.
+
+### 참고 실험: 테스트가 잡지 못하는 문제 24개
+
+기존 테스트에 걸리지 않은 24개도 따로 돌렸습니다. 이쪽은 테스트가 아니라 "제가 심었다"는 사실이 정답의 근거라서 본 실험과 분리했습니다.
+
+| | 결과 |
+|---|---|
+| 동작을 바꾼 문제 12개 | 12개 잡음 |
+| 빼 놓은 동작 12개 | 12개 잡음 |
+| 시간 | 중앙값 13초, 최대 19초 |
+| 비용 | 24회에 0.90달러, 1회 0.037달러 |
+
+테스트가 닿지 않는 곳에서도 채점자가 문제를 찾았다는 뜻입니다. 동시에 지금의 테스트에 빈 곳이 24군데 있다는 뜻이기도 합니다. 어떤 것들인지는 `docs/auto-reply-research/pool.mjs`의 `EXTRA` 목록에 있습니다.
+
+### 실제 카드 1건
+
+플러그인에 넣은 뒤, 이 저장소에서 작업 중이던 대화의 카드에 채점을 한 번 돌렸습니다. 목표는 적지 않았습니다. 32초, 0.16달러가 들었고, 변경 내역이 큰 만큼 실험보다 오래 걸렸습니다. 채점자는 계획 문서(`docs/`의 계획 파일)를 스스로 찾아 읽고 고칠 것 4건을 냈습니다: 패널에 아직 연결되지 않음, 테스트 없음, 주석이 인용한 문서가 아직 없음, README의 약속이 고쳐지지 않음. 그 시점의 작업 상태로는 네 건 모두 사실이었습니다.
+
+## 한계
+
+- **쉬운 조건입니다.** 작은 순수 함수에 문제 하나, 번호 붙은 분명한 기준입니다. 실제 일은 변경이 크고 목표가 덜 분명합니다.
+- **표본이 작습니다.** 정상 사례가 6개뿐이라 잘못된 지적의 비율은 대략적인 값입니다.
+- **문제를 만든 쪽과 찾은 쪽이 같은 계열의 모델입니다.** 제가 떠올린 문제는 채점자도 떠올리기 쉽습니다.
+- **재지 않은 것**: 채점 결과로 답장을 보냈을 때 최종 결과물이 실제로 좋아지는지, `/goal`이나 정해 둔 문구와 비교해 어떤지, 문서 작업에서는 어떤지, 다른 모델은 어떤지.
+- **반복 일치는 판정 수준입니다.** 판정(통과 / 고칠 것 있음)은 6개 모두 같았지만 지적의 내용은 실행마다 달라질 수 있습니다(`c1`).
+
+## 플러그인에 반영한 것
+
+- 카드 편집 창에 **목표** 칸, 카드를 클릭하면 열리는 창에 **채점** 버튼. 목표를 저장하면 그 창이 열리고 입력 칸에 목표가 들어 있어, Enter로 에이전트에게 보냅니다.
+- 채점 결과는 답장 창에 **채점표**(기준별 통과 여부와 증거, 고칠 것, 시간과 비용)로 나오고, 고칠 것이 있으면 **답장 초안**이 입력 칸에 들어옵니다. Enter로 그대로 보내거나 고쳐서 보냅니다. 초안에는 "틀린 지적이면 고치지 말고 이유를 답하라"는 문장이 붙습니다.
+- 채점자에게는 목표, 마지막 요청, 에이전트의 마지막 답과 함께 git의 변경 내역을 줍니다. 목표를 처음 적은 시점의 커밋이 기준점입니다.
+- 설정 **"턴이 끝나면 미리 채점"**(기본 꺼짐): 체크돼 있고 목표가 적힌 대화가 턴을 잘 마치면 채점을 미리 돌려 둡니다.
+- 채점 모델은 이 실험을 통과한 Sonnet, 중간 노력 수준입니다. 1회 상한은 0.5달러, 5분입니다.
+- 어떤 답장도 자동으로 나가지 않습니다.
+
+## 다음에 볼 것
+
+- 실제로 20턴쯤 쓴 뒤 답장 창의 "지금까지 초안" 수치(그대로 보냄, 고쳐서 보냄, 쓰지 않음)를 봅니다. 그대로 보낸 비율이 높아야 자동 전송을 논의할 수 있습니다.
+- 자동 전송을 넣는다면 필요한 것: 보내기 직전에 대화가 그 턴 그대로인지와 입력 칸이 비었는지 재확인, 회차 상한, 질문과 권한 요청에는 답하지 않음, 한 폴더에 대화가 하나일 때만, 채점자가 읽은 파일 속 문장이 답장을 거쳐 지시가 되는 위험에 대한 대비.
+- 채점 모델이나 지시문을 바꿀 때는 아래 방법으로 이 실험을 다시 돌려 확인합니다.
+
+## 다시 돌리는 법
+
+사례, 실행 스크립트, 채점표 원문이 `docs/auto-reply-research/`에 있습니다.
+
+```sh
+node docs/auto-reply-research/experiment.mjs setup            # 사례를 만든 소스(커밋 5f5e555)를 임시 폴더에 복사
+node docs/auto-reply-research/experiment.mjs prep             # 사례마다 기존 테스트 실행 (Orca 필요, 사례당 약 8초)
+node docs/auto-reply-research/experiment.mjs run main 1       # 본 실험 24회 (Claude Code 로그인과 사용량을 씀)
+node docs/auto-reply-research/experiment.mjs run main 2 s2 m6 s9 c1 ok1 ok4   # 반복 6회
+node docs/auto-reply-research/experiment.mjs run extra 1      # 참고 실험 24회
+node docs/auto-reply-research/experiment.mjs score main --md  # 집계. 새 실행 결과가 없으면 보관된 결과를 집계
+```
+
+- `pool.mjs`: 사례 전부(무엇을 무엇으로 바꿨는지, 어느 기준을 어기는지)와 함수별 기준 목록.
+- `results/main.json`, `results/extra.json`: 실행마다 채점자가 낸 채점표 원문, 시간, 비용.
+
+## 부록: 사례별 결과
+
+`caught`는 심은 문제를 잡은 것, `passed`는 정상 사례를 통과시킨 것입니다. "함께 미달로 표시한 다른 기준"은 심은 문제가 어기는 기준 말고 채점자가 미달로 표시한 기준의 번호입니다.
+
+### 본 실험 (30회)
+
+| 사례 | 종류 | 함수 | 판정 | 결과 | 함께 미달로 표시한 다른 기준 | 시간(초) | 비용($) |
+|---|---|---|---|---|---|---|---|
+| b1 | bug | moveCard | must-fix | caught | - | 13 | 0.046 |
+| b9 | incomplete | deleteCard | must-fix | caught | - | 11 | 0.045 |
+| c1 | incomplete | findOnWindowsPath | must-fix | caught | - | 13 | 0.052 |
+| c1 (반복) | incomplete | findOnWindowsPath | must-fix | caught | 2 | 15 | 0.051 |
+| c4 | bug | extraEnv | must-fix | caught | - | 11 | 0.051 |
+| c5 | incomplete | quoteCmdArg | must-fix | caught | - | 13 | 0.049 |
+| m12 | bug | monitorView | must-fix | caught | - | 12 | 0.026 |
+| m2 | bug | cronEverySec | must-fix | caught | - | 12 | 0.030 |
+| m3 | incomplete | applyToolCall | must-fix | caught | - | 11 | 0.029 |
+| m4 | bug | applyToolCall | must-fix | caught | - | 10 | 0.023 |
+| m5 | bug | applyToolCall | must-fix | caught | - | 11 | 0.025 |
+| m6 | bug | monitorDeadline | must-fix | caught | - | 12 | 0.031 |
+| m6 (반복) | bug | monitorDeadline | must-fix | caught | - | 12 | 0.025 |
+| m7 | bug | monitorView | must-fix | caught | - | 12 | 0.027 |
+| ok1 | ok | syncColumns | pass | passed | - | 11 | 0.024 |
+| ok1 (반복) | ok | syncColumns | pass | passed | - | 11 | 0.022 |
+| ok2 | ok | moveCard | pass | passed | - | 10 | 0.038 |
+| ok3 | ok | applyToolCall | pass | passed | - | 11 | 0.025 |
+| ok4 | ok | markUnseen | pass | passed | - | 10 | 0.041 |
+| ok4 (반복) | ok | markUnseen | pass | passed | - | 9 | 0.034 |
+| ok5 | ok | cronEverySec | must-fix | FALSE ALARM | 3 | 14 | 0.029 |
+| ok6 | ok | setColumns | pass | passed | - | 11 | 0.043 |
+| s1 | incomplete | syncColumns | must-fix | caught | 1 | 13 | 0.022 |
+| s12 | bug | applyWorkspaceStatuses | must-fix | caught | - | 15 | 0.031 |
+| s2 | bug | syncColumns | must-fix | caught | - | 13 | 0.026 |
+| s2 (반복) | bug | syncColumns | must-fix | caught | - | 14 | 0.028 |
+| s3 | bug | syncColumns | must-fix | caught | - | 13 | 0.026 |
+| s8 | bug | applyWorkspaceStatuses | must-fix | caught | - | 16 | 0.037 |
+| s9 | incomplete | applyWorkspaceStatuses | must-fix | caught | - | 15 | 0.035 |
+| s9 (반복) | incomplete | applyWorkspaceStatuses | must-fix | caught | - | 14 | 0.028 |
+
+### 참고 실험 (24회)
+
+| 사례 | 종류 | 함수 | 판정 | 결과 | 함께 미달로 표시한 다른 기준 | 시간(초) | 비용($) |
+|---|---|---|---|---|---|---|---|
+| b10 | bug | mergeChats | must-fix | caught | - | 13 | 0.046 |
+| b11 | incomplete | mergeChats | must-fix | caught | - | 15 | 0.043 |
+| b12 | incomplete | mergeChats | must-fix | caught | - | 14 | 0.043 |
+| b14 | bug | adoptCard | must-fix | caught | - | 12 | 0.041 |
+| b15 | incomplete | cleanTitle | must-fix | caught | - | 13 | 0.042 |
+| b2 | incomplete | moveCard | must-fix | caught | 1, 2 | 13 | 0.042 |
+| b3 | bug | setColumns | must-fix | caught | - | 14 | 0.041 |
+| b4 | incomplete | setColumns | must-fix | caught | - | 12 | 0.040 |
+| b5 | incomplete | setColumns | must-fix | caught | - | 13 | 0.040 |
+| b6 | incomplete | markUnseen | must-fix | caught | - | 10 | 0.038 |
+| b7 | bug | markUnseen | must-fix | caught | - | 12 | 0.039 |
+| b8 | incomplete | startInProgress | must-fix | caught | - | 13 | 0.042 |
+| c3 | bug | findOnWindowsPath | must-fix | caught | - | 12 | 0.048 |
+| m1 | bug | cronEverySec | must-fix | caught | - | 13 | 0.028 |
+| m10 | bug | onRun | must-fix | caught | - | 12 | 0.025 |
+| m11 | bug | monitorView | must-fix | caught | - | 14 | 0.030 |
+| m8 | bug | monitorDeadline | must-fix | caught | - | 12 | 0.026 |
+| m9 | incomplete | applyToolCall | must-fix | caught | - | 11 | 0.024 |
+| s10 | incomplete | moveWorkspaceCards | must-fix | caught | - | 15 | 0.059 |
+| s11 | bug | moveWorkspaceCards | must-fix | caught | - | 15 | 0.032 |
+| s4 | incomplete | editSyncedColumns | must-fix | caught | 1 | 13 | 0.031 |
+| s5 | bug | applyWorkspaceStatuses | must-fix | caught | - | 19 | 0.040 |
+| s6 | incomplete | applyWorkspaceStatuses | must-fix | caught | - | 15 | 0.030 |
+| s7 | bug | applyWorkspaceStatuses | must-fix | caught | - | 14 | 0.029 |

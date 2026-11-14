@@ -7,7 +7,7 @@ import { STATUS_ICON, type StatusKind } from './icons.ts'
 import { locale, setLanguage, t } from './i18n.ts'
 import { isStale } from '../src/monitor.ts'
 import { hidePreview, schedulePreview } from './preview.ts'
-import { closeReply, openReply, replyKey, setReplyWaiting } from './reply.ts'
+import { closeReply, openReply, replyKey, setReplyJudge, setReplyWaiting } from './reply.ts'
 
 const INTERRUPTED = new Set(['interruption', 'failure', 'cancellation'])
 
@@ -212,6 +212,10 @@ function showFlash(msg: string, good = false): void {
 function setView(next: BoardView | null): void {
   if (next) view = next
   render()
+  // A review of the chat whose reply box is open started or came in: the box shows it.
+  const open = replyKey()
+  const card = open ? view?.cards.find((c) => c.key === open) : null
+  if (open && card) setReplyJudge(open, card.judge ?? null, card.drafts ?? null)
   openNextWaiting()
 }
 
@@ -306,6 +310,11 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' = 'click'): void 
       key: c.key,
       title: titleOf(c),
       workspace: c.worktreeName,
+      goal: c.goal ?? null,
+      goalSent: c.goalSent === true,
+      judge: c.judge ?? null,
+      tally: c.drafts ?? null,
+      turnAt: c.stateAt,
       chatTab: !!c.sessionId,
       working: kind === 'working',
       blocked: kind === 'blocked',
@@ -440,6 +449,8 @@ function renderCard(c: CardView): HTMLElement {
   const edit = el('button', { class: 'ghost', title: t.editCard }, '✎')
   edit.onclick = (e) => {
     e.stopPropagation()
+    // A preview on its way for this card would land on the form.
+    hidePreview()
     editingCard = c.key
     render(true)
   }
@@ -535,9 +546,13 @@ function renderEditor(c: CardView): HTMLElement {
   label.value = current
   const note = el('textarea', { rows: '3', placeholder: t.noteHint, 'aria-label': t.note })
   note.value = c.note
+  // The goal: what a review of this chat's work is held against. Open chats only (a review reads the chat's folder).
+  const goal = c.closed ? null : el('textarea', { rows: '3', placeholder: t.goalHint, 'aria-label': t.goal, title: t.goalTitle })
+  if (goal) goal.value = c.goal ?? ''
   const save = async () => {
     editingCard = null
-    const patch: { key: string; note: string; label?: string } = { key: c.key, note: note.value }
+    const patch: { key: string; note: string; label?: string; goal?: string } = { key: c.key, note: note.value }
+    if (goal && goal.value.trim() !== (c.goal ?? '')) patch.goal = goal.value
     if (label.value.trim() !== current) patch.label = label.value
     if (patch.label !== undefined) {
       const card = view?.cards.find((x) => x.key === c.key)
@@ -545,6 +560,11 @@ function renderEditor(c: CardView): HTMLElement {
     }
     render(true)
     setView(await request<BoardView>('card.update', patch))
+    // A goal the agent has not been sent yet: the next step is to send it, and that is done in
+    // this chat's box. It opens with the goal ready in its field, whether the goal is new or was
+    // saved before and never sent.
+    const saved = view?.cards.find((x) => x.key === c.key)
+    if (saved?.goal && !saved.goalSent && !saved.closed && !replyKey()) showReply(saved, 'next')
   }
   const cancel = () => {
     editingCard = null
@@ -560,12 +580,15 @@ function renderEditor(c: CardView): HTMLElement {
   }
   label.onkeydown = onKey
   note.onkeydown = onKey
+  if (goal) goal.onkeydown = onKey
   const ok = el('button', { class: 'primary' }, t.save)
   ok.onclick = () => void save()
   const no = el('button', { class: 'ghost' }, t.cancel)
   no.onclick = cancel
   setTimeout(() => label.focus())
-  return el('div', { class: 'edit' }, label, note, el('div', { class: 'edit-actions' }, no, ok))
+  // The form is where a goal is written, the reply box is where the work is checked against it: say so here.
+  const where = goal ? el('div', { class: 'edit-hint' }, c.goal && c.goalSent ? t.goalWhereSent : t.goalWhere) : null
+  return el('div', { class: 'edit' }, label, note, goal, where, el('div', { class: 'edit-actions' }, no, ok))
 }
 
 function clearDropMarks(): void {

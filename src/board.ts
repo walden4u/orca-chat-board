@@ -1,5 +1,5 @@
 // Pure board logic: merging live terminals into the stored board, moving and editing cards.
-import type { BoardState, Column, StoredCard } from './protocol.ts'
+import type { BoardState, Column, DraftTally, JudgeState, StoredCard } from './protocol.ts'
 
 /** One row of `orca terminal list --json` (only the fields the board uses). */
 export type LiveTerminal = {
@@ -188,7 +188,13 @@ export function setColumns(prev: BoardState, columns: Column[]): BoardState {
   return { ...prev, columns: clean, cards }
 }
 
-export function updateCard(prev: BoardState, key: string, patch: { label?: string; note?: string; watch?: boolean }): BoardState {
+export const MAX_GOAL_CHARS = 4000
+
+export function updateCard(
+  prev: BoardState,
+  key: string,
+  patch: { label?: string; note?: string; watch?: boolean; goal?: string; goalSent?: boolean }
+): BoardState {
   const card = prev.cards[key]
   if (!card) return prev
   const next = { ...card }
@@ -196,7 +202,62 @@ export function updateCard(prev: BoardState, key: string, patch: { label?: strin
   if (typeof patch.note === 'string') next.note = patch.note.slice(0, 2000)
   if (patch.watch === true) next.watch = true
   else if (patch.watch === false) delete next.watch
+  if (typeof patch.goal === 'string') {
+    const goal = patch.goal.trim().slice(0, MAX_GOAL_CHARS)
+    // Other words are another goal as far as the chat knows: it has not been sent these.
+    if (goal !== (card.goal ?? '')) delete next.goalSent
+    if (goal) next.goal = goal
+    else {
+      // No goal, no starting point for one either: the next goal starts from where the folder is then.
+      delete next.goal
+      delete next.goalBase
+    }
+  }
+  if (patch.goalSent === true && next.goal) next.goalSent = true
   return { ...prev, cards: { ...prev.cards, [key]: next } }
+}
+
+/** Remembers the commit a chat's folder was at when its goal was written (null: no git history). */
+export function setGoalBase(prev: BoardState, key: string, base: string | null): BoardState {
+  const card = prev.cards[key]
+  if (!card || !card.goal) return prev
+  return { ...prev, cards: { ...prev.cards, [key]: { ...card, goalBase: base } } }
+}
+
+function tallied(drafts: DraftTally | undefined, how: keyof DraftTally): DraftTally {
+  const next = { asIs: 0, edited: 0, dropped: 0, ...drafts }
+  next[how] += 1
+  return next
+}
+
+/**
+ * Puts a review's state on its card. A draft that was offered and never used counts as dropped
+ * the moment another review takes its place.
+ */
+export function setJudge(prev: BoardState, key: string, judge: JudgeState): BoardState {
+  const card = prev.cards[key]
+  if (!card) return prev
+  const next: StoredCard = { ...card, judge }
+  if (judge.state === 'running' && card.judge?.draft && !card.judge.used) next.drafts = tallied(card.drafts, 'dropped')
+  return { ...prev, cards: { ...prev.cards, [key]: next } }
+}
+
+/** You answered after a review: counts how its draft was used, once per review. */
+export function tallyDraft(prev: BoardState, key: string, how: keyof DraftTally): BoardState {
+  const card = prev.cards[key]
+  if (!card?.judge?.draft || card.judge.used) return prev
+  return { ...prev, cards: { ...prev.cards, [key]: { ...card, judge: { ...card.judge, used: true }, drafts: tallied(card.drafts, how) } } }
+}
+
+/** A review cannot outlive the worker that started it: what still says "running" was cut off. */
+export function endRunningJudges(prev: BoardState): BoardState {
+  let cards: Record<string, StoredCard> | null = null
+  for (const card of Object.values(prev.cards)) {
+    if (card.judge?.state !== 'running') continue
+    cards ??= { ...prev.cards }
+    cards[card.key] = { ...card, judge: { state: 'failed', at: card.judge.at, error: 'interrupted' } }
+  }
+  return cards ? { ...prev, cards } : prev
 }
 
 /** Sets or clears the unseen mark of the given cards; answers `prev` when nothing changes. */

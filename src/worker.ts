@@ -1,7 +1,7 @@
 // Chat Board worker: keeps the board in storage, lists chats through the orca CLI, tracks agent
 // status from events, and answers the panel.
 import type { OrcaWorkerApi } from 'orca/worker'
-import type { AgentState, BoardState, BoardView, CardView, Column } from './protocol.ts'
+import type { AgentState, BoardState, BoardView, CardPatch, CardView, Column, JudgeNote, JudgeState } from './protocol.ts'
 import {
   activeTabsByWorktree,
   adoptCard,
@@ -10,12 +10,16 @@ import {
   tabTitlesOf,
   clearArchived,
   deleteCard,
+  endRunningJudges,
   markUnseen,
   mergeChats,
   moveCard,
   normalizeBoard,
   setColumns,
+  setGoalBase,
+  setJudge,
   startInProgress,
+  tallyDraft,
   updateCard,
   type LiveTerminal
 } from './board.ts'
@@ -43,6 +47,8 @@ import { dropAttachment, putAttachment, saveAttachment } from './attach.ts'
 import { readWorkspaceStatusNames } from './profile.ts'
 import { looksBusy, suggestionOf } from './screen.ts'
 import { applyWorkspaceStatuses, editSyncedColumns, moveWorkspaceCards } from './sync.ts'
+import { changedFiles, changesNote, clipDiff, draftReply, isKorean, judgeArgs, judgePrompt, readJudgeOutput } from './judge.ts'
+import { folderIsHere, runTool } from './tools.ts'
 
 const BOARD_KEY = 'board'
 const STATUS_KEY = 'status'
@@ -67,6 +73,14 @@ const STARTED_AFTER_MS = 10_000
 /** A look at the screen that changed nothing is not repeated sooner than this. */
 const PROBE_EVERY_MS = 5000
 
+/**
+ * How the judge runs: the cheapest model that passed the check in docs/auto-reply-research.md.
+ * A review there took about 12 seconds and 3 cents; the caps are for a folder with far more to read.
+ */
+const JUDGE = { model: 'sonnet', effort: 'medium', budgetUsd: 0.5 }
+const JUDGE_TIMEOUT_MS = 300_000
+const GIT_TIMEOUT_MS = 15_000
+
 type Status = {
   state: AgentState
   at: number
@@ -86,6 +100,10 @@ export default function activate(orca: OrcaWorkerApi): void {
   let lastChatTabs: ReturnType<typeof chatTabsOf> = []
   /** Tab ids on screen in the focused workspace at the last listing. */
   let visible = new Set<string>()
+  /** The folder each chat works in, by card key, from the latest listing. */
+  let folders: Record<string, string> = {}
+  /** The chat a judge is reviewing right now: one review at a time. */
+  let judging: string | null = null
   /** Workspace statuses from the last `orca worktree list`, by worktree id (only read while synced). */
   let workspaceStatus = new Map<string, string>()
   let workspaceStatusAt = 0
@@ -215,7 +233,7 @@ export default function activate(orca: OrcaWorkerApi): void {
     let changed = false
     const unread: string[] = []
     const read: string[] = []
-    const stopped: { key: string; handle: string; at: number }[] = []
+    const stopped: { key: string; handle: string; at: number; state: AgentState; interrupted: boolean }[] = []
     for (const w of ps) {
       for (const a of w.agents ?? []) {
         if (a.parentPaneKey) continue
@@ -231,7 +249,7 @@ export default function activate(orca: OrcaWorkerApi): void {
           changed = true
           // This listing can be ahead of the event for the same change (events wait their turn
           // behind a refresh). The event then finds nothing new, so the turn's end is noted here.
-          if (prev?.state === 'working' && a.state !== 'working') stopped.push({ key: tabId, handle, at })
+          if (prev?.state === 'working' && a.state !== 'working') stopped.push({ key: tabId, handle, at, state: a.state, interrupted: a.interrupted === true })
         }
         if (state.cards[tabId]?.sessionId) (a.activity?.unread ? unread : read).push(tabId)
       }
@@ -245,6 +263,8 @@ export default function activate(orca: OrcaWorkerApi): void {
       if (!card || card.sessionId || (await liveMonitor(s.handle)) || (!card.watch && visible.has(s.key))) continue
       if (card.watch) orca.log(`checked chat ${s.key.slice(0, 8)}: working -> stopped, seen in a listing before its event`)
       next = markUnseen(next, [s.key], s.at || Date.now())
+      // The event for this stop will find nothing new, so the review it would have started starts here.
+      void judgeFinished(s.key, s.state, s.interrupted)
     }
     return next
   }
@@ -315,10 +335,14 @@ export default function activate(orca: OrcaWorkerApi): void {
           orca.log(`worktree ps failed: ${(err as Error).message.split('\n')[0]}`)
         }
       }
-      const merged = mergeChats(state, [...chatsOf(withTabTitles), ...lastChatTabs], Date.now())
+      const chats = [...chatsOf(withTabTitles), ...lastChatTabs]
+      const merged = mergeChats(state, chats, Date.now())
       state = merged.state
       handles = merged.handles
       lastOutput = merged.lastOutput
+      folders = Object.fromEntries(chats.map((t) => [t.tabId, t.worktreePath]))
+      // A review still marked as running, with no judge at work: the worker was reloaded under it.
+      if (!judging) state = endRunningJudges(state)
       visible = await visibleTabs(terminals, layouts)
       // A chat on screen counts as seen. Not a checked one: its reply box is where you read it,
       // and the tab on screen may just be the one you left open while working from the board.
@@ -407,8 +431,14 @@ export default function activate(orca: OrcaWorkerApi): void {
   })
   orca.settings.onDidChange(() => void resync())
 
-  // The name of an open chat is its Orca tab's title: rename the tab, then re-list.
   orca.panels.handle('card.update', async (patch) => {
+    const v = await applyCardPatch(patch)
+    if (typeof patch.goal === 'string' && patch.goal.trim()) void noteGoalBase(patch.key).catch(() => undefined)
+    return v
+  })
+
+  // The name of an open chat is its Orca tab's title: rename the tab, then re-list.
+  async function applyCardPatch(patch: CardPatch): Promise<BoardView> {
     const handle = handles[patch.key]
     const sessionId = (await loadBoard()).cards[patch.key]?.sessionId
     if (typeof patch.label === 'string' && handle && (!sessionId || patch.label.trim())) {
@@ -423,7 +453,20 @@ export default function activate(orca: OrcaWorkerApi): void {
       }
     }
     return mutate((s) => updateCard(s, patch.key, patch))
-  })
+  }
+
+  /**
+   * A goal written on a card that had none: where the folder is now is where that goal's work
+   * starts, and a review shows the judge what changed since. Changing the goal's words later keeps
+   * the starting point; clearing the goal drops it.
+   */
+  async function noteGoalBase(key: string): Promise<void> {
+    const folder = folders[key]
+    const card = (await loadBoard()).cards[key]
+    if (!card?.goal || card.goalBase !== undefined || !folder || !folderIsHere(folder)) return
+    const head = (await gitText(folder, ['rev-parse', 'HEAD']))?.trim() || null
+    await mutate((s) => (s.cards[key]?.goal && s.cards[key]?.goalBase === undefined ? setGoalBase(s, key, head) : s))
+  }
   orca.panels.handle('card.seen', ({ key }) => mutate((s) => markUnseen(s, [key], null)))
   // The panel has no log of its own: its notes about the reply boxes land in the plugin's log.
   orca.panels.handle('trace', ({ message }) => {
@@ -526,6 +569,135 @@ export default function activate(orca: OrcaWorkerApi): void {
       orca.log(`send failed: ${reason}`)
       return { ok: false, error: reason }
     }
+  })
+
+  // ---------- the judge ----------
+
+  /**
+   * What a git command printed, or null when it failed (no git, not a repository, no such commit).
+   * Git only reads here: without its optional locks, `git status` does not even refresh the index.
+   */
+  async function gitText(folder: string, args: string[]): Promise<string | null> {
+    try {
+      const r = await runTool('git', ['--no-optional-locks', ...args], { cwd: folder, timeoutMs: GIT_TIMEOUT_MS })
+      return r.code === 0 ? r.stdout : null
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * What changed in a chat's folder, for the judge: since the goal was written when that is known,
+   * else what is not committed yet, else (nothing uncommitted) the last commit.
+   */
+  async function changesIn(folder: string, base: string | null): Promise<{ files: string[]; diff: string | null; notes: JudgeNote[] }> {
+    if ((await gitText(folder, ['rev-parse', '--is-inside-work-tree']))?.trim() !== 'true') return { files: [], diff: null, notes: ['no-git'] }
+    const notes: JudgeNote[] = []
+    const porcelain = (await gitText(folder, ['status', '--porcelain', '--untracked-files=all'])) ?? ''
+    const from = base && (await gitText(folder, ['cat-file', '-e', `${base}^{commit}`])) !== null ? base : 'HEAD'
+    let names = (await gitText(folder, ['diff', '--name-only', from])) ?? ''
+    let diff = (await gitText(folder, ['diff', '--no-color', from])) ?? ''
+    if (from === 'HEAD' && !names.trim() && !porcelain.trim()) {
+      names = (await gitText(folder, ['show', '--name-only', '--format=', 'HEAD'])) ?? ''
+      diff = (await gitText(folder, ['show', '--no-color', '--format=%h %s', 'HEAD'])) ?? ''
+      if (diff.trim()) notes.push('last-commit')
+    }
+    const clipped = clipDiff(diff)
+    if (clipped.cut) notes.push('diff-cut')
+    return { files: changedFiles(names, porcelain), diff: clipped.text.trim() ? clipped.text : null, notes }
+  }
+
+  /** One review: gathers what was asked and what changed, runs the judge in the chat's folder, reads its answer. */
+  async function runJudge(key: string, folder: string, started: number): Promise<JudgeState> {
+    const board = await loadBoard()
+    const card = board.cards[key]
+    if (!card) return { state: 'failed', at: started, error: 'closed' }
+    const base = card.goalBase && /^[0-9a-f]{7,64}$/i.test(card.goalBase) ? card.goalBase : null
+    const [agents, changes] = await Promise.all([listAgents().catch(() => [] as PsWorktree[]), changesIn(folder, base)])
+    let prompt: string | null = null
+    let claim: string | null = null
+    for (const w of agents) {
+      for (const a of w.agents ?? []) {
+        if (a.parentPaneKey || a.paneKey.split(':')[0] !== key) continue
+        prompt = a.prompt || null
+        claim = a.lastAssistantMessage || null
+      }
+    }
+    const goal = card.goal?.trim() || null
+    // Nothing says what was asked: there is nothing to judge the work against.
+    if (!goal && !prompt) return { state: 'failed', at: started, error: 'nothing' }
+    const notes: JudgeNote[] = [...changes.notes]
+    if (!goal) notes.push('no-goal')
+    if (Object.values(board.cards).some((c) => c.key !== key && !c.closed && c.worktreeId === card.worktreeId)) notes.push('shared-folder')
+    const run = await runTool('claude', judgeArgs(JUDGE), {
+      cwd: folder,
+      input: judgePrompt({ goal, prompt, claim, files: changes.files, diff: changes.diff, diffNote: changesNote(notes) }),
+      timeoutMs: JUDGE_TIMEOUT_MS
+    })
+    const read = readJudgeOutput(run.stdout)
+    const ms = Date.now() - started
+    if (!read.verdict) return { state: 'failed', at: started, error: read.error ?? 'failed', costUsd: read.costUsd, ms, notes }
+    return { state: 'done', at: started, verdict: read.verdict, draft: draftReply(read.verdict, isKorean(goal, prompt)), costUsd: read.costUsd, ms, notes }
+  }
+
+  /** Starts a review and answers at once; its result reaches the panels with a board update. */
+  async function startJudge(key: string): Promise<{ ok: boolean; error: string | null }> {
+    if (refreshedAt === 0) await serial(refresh)
+    const card = (await loadBoard()).cards[key]
+    if (!card || card.closed) return { ok: false, error: 'closed' }
+    if (judging) return { ok: false, error: 'busy' }
+    const folder = folders[key]
+    if (!folder || !folderIsHere(folder)) return { ok: false, error: 'no-folder' }
+    judging = key
+    const started = Date.now()
+    await mutate((s) => setJudge(s, key, { state: 'running', at: started }))
+    void runJudge(key, folder, started)
+      .catch((err): JudgeState => ({ state: 'failed', at: started, error: (err as Error).message.split('\n')[0] || 'failed', ms: Date.now() - started }))
+      .then(async (result) => {
+        const said = result.state === 'done' ? `${result.verdict?.verdict}, ${result.verdict?.mustFix.length ?? 0} to fix` : `failed (${result.error})`
+        const cost = typeof result.costUsd === 'number' ? `, $${result.costUsd.toFixed(3)}` : ''
+        orca.log(`judge ${key.slice(0, 8)}: ${said} in ${Math.round((result.ms ?? 0) / 1000)} s${cost}`)
+        await mutate((s) => setJudge(s, key, result))
+      })
+      .catch((err) => orca.log(`judge result not kept: ${(err as Error).message.split('\n')[0]}`))
+      .finally(() => {
+        judging = null
+      })
+    return { ok: true, error: null }
+  }
+
+  const judgeOnFinishOn = async (): Promise<boolean> => {
+    try {
+      return (await orca.settings.get('judgeOnFinish')) === true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * With the setting on: a checked chat with a goal whose turn just ended is reviewed at once, so
+   * the verdict is there when you open its reply box. Not after a turn that ended badly (`bad`:
+   * interrupted, failed, cancelled), and not for a question or a permission request: those are
+   * yours to answer. Its callers hold the queue this waits in, so they never await it.
+   */
+  async function judgeFinished(key: string, state: AgentState, bad: boolean): Promise<void> {
+    try {
+      if (state !== 'done' || bad || !(await judgeOnFinishOn())) return
+      const card = (await loadBoard()).cards[key]
+      if (!card?.watch || !card.goal || card.closed) return
+      const started = await startJudge(key)
+      if (!started.ok) orca.log(`judge ${key.slice(0, 8)}: not started by itself (${started.error})`)
+    } catch (err) {
+      orca.log(`judge ${key.slice(0, 8)}: not started by itself (${(err as Error).message.split('\n')[0]})`)
+    }
+  }
+
+  // A review by the judge, asked for in a reply box. It sends nothing to the chat: the judge reads
+  // the chat's folder, and what it finds is offered in the reply box as a draft you send or not.
+  orca.panels.handle('judge.run', ({ key }) => startJudge(String(key)))
+  orca.panels.handle('judge.tally', async ({ key, how }) => {
+    if (how === 'asIs' || how === 'edited' || how === 'dropped') await mutate((s) => tallyDraft(s, String(key), how))
+    return null
   })
 
   // A chat archived from its card: its tab is closed in Orca (there is no card without a tab to
@@ -705,6 +877,8 @@ export default function activate(orca: OrcaWorkerApi): void {
         await orca.storage.set(BOARD_KEY, board)
       }
       orca.panels.post('board.changed', await view(board))
+      // Orca often says nothing about how a turn ended; when it does, only "success" is a turn to review.
+      if (needsYou) void judgeFinished(key, state, outcome !== null && outcome !== 'success')
     })
   )
 }
