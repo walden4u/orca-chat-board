@@ -4,7 +4,8 @@ import { execFile } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { envGet, extraEnv, findOnWindowsPath, joinPath, type OrcaHost } from './cli.ts'
 
-export type Tool = 'claude' | 'git'
+/** `shell`: one command line of yours (a card's check command), run by the system's shell. */
+export type Tool = 'claude' | 'git' | 'shell'
 
 export type ToolRun = {
   /** Folder the program runs in. */
@@ -78,14 +79,25 @@ const programs: Partial<Record<Tool, string | null>> = {}
 
 const defaultRunner: ToolRunner = (tool, args, run) => {
   const host = currentHost()
-  if (programs[tool] === undefined) programs[tool] = tool === 'claude' ? claudeProgram(host, existsSync) : gitProgram(host, existsSync)
-  const file = programs[tool]
+  if (tool !== 'shell' && programs[tool] === undefined) programs[tool] = tool === 'claude' ? claudeProgram(host, existsSync) : gitProgram(host, existsSync)
+  const windows = host.platform === 'win32'
+  const comspec = envGet(host, 'ComSpec')
+  const file = tool === 'shell' ? (windows ? comspec || 'cmd.exe' : '/bin/sh') : programs[tool]
   if (!file) return Promise.reject(new Error(`${tool} was not found on this machine`))
+  // A command line goes to the shell as you wrote it: cmd.exe takes it verbatim after /c.
+  if (tool === 'shell') args = windows ? ['/d', '/s', '/c', `"${args[0] ?? ''}"`] : ['-c', args[0] ?? '']
   return new Promise((resolve, reject) => {
     const child = execFile(
       file,
       args,
-      { cwd: run.cwd, maxBuffer: 32 * 1024 * 1024, timeout: run.timeoutMs, windowsHide: true, env: tool === 'claude' ? judgeEnv(host) : { ...process.env } },
+      {
+        cwd: run.cwd,
+        maxBuffer: 32 * 1024 * 1024,
+        timeout: run.timeoutMs,
+        windowsHide: true,
+        windowsVerbatimArguments: tool === 'shell' && windows,
+        env: tool === 'git' ? { ...process.env } : judgeEnv(host)
+      },
       (err, stdout, stderr) => {
         if (!err) return resolve({ stdout, stderr, code: 0 })
         // Killed by the timeout, or never started: there is no answer to read.

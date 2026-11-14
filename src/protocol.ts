@@ -44,7 +44,12 @@ export type JudgeState = {
   /** Why the run failed: `interrupted`, `nothing`, or the reason the judge or the program gave. */
   error?: string
   notes?: JudgeNote[]
+  /** The card's check command as the board ran it for this review: its exit code and the end of what it printed. */
+  check?: JudgeCheck
 }
+
+/** `code` null: the command did not finish (it could not be started, or ran past its time). */
+export type JudgeCheck = { command: string; code: number | null; ms: number; tail: string }
 
 /**
  * A chat's goal as its folder holds it: the checklist in GOAL.md, which the agent writes and ticks
@@ -78,6 +83,11 @@ export type StoredCard = {
   unseenAt?: number | null
   /** You checked this chat: when its agent finishes unseen, the panel opens its reply box by itself. */
   watch?: boolean
+  /**
+   * A command of yours that tells whether the work holds (`mix test`, say). With goal mode on, a
+   * review runs it in the chat's folder first and hands its output to the judge, who cannot run anything.
+   */
+  verify?: string
   judge?: JudgeState
   drafts?: DraftTally
   addedAt: number
@@ -136,7 +146,7 @@ export type MonitorInfo = {
   label: string | null
 }
 
-export type CardPatch = { key: string; label?: string; note?: string; watch?: boolean }
+export type CardPatch = { key: string; label?: string; note?: string; watch?: boolean; verify?: string }
 
 declare module 'orca' {
   interface PluginRequests {

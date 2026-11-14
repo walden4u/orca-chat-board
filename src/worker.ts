@@ -1,7 +1,7 @@
 // Chat Board worker: keeps the board in storage, lists chats through the orca CLI, tracks agent
 // status from events, and answers the panel.
 import type { OrcaWorkerApi } from 'orca/worker'
-import type { AgentState, BoardState, BoardView, CardView, Column, GoalFile, JudgeNote, JudgeState } from './protocol.ts'
+import type { AgentState, BoardState, BoardView, CardView, Column, GoalFile, JudgeCheck, JudgeNote, JudgeState } from './protocol.ts'
 import {
   activeTabsByWorktree,
   adoptCard,
@@ -10,6 +10,7 @@ import {
   tabTitlesOf,
   clearArchived,
   deleteCard,
+  dropUnusedDraft,
   endRunningJudges,
   markUnseen,
   mergeChats,
@@ -46,7 +47,7 @@ import { dropAttachment, putAttachment, saveAttachment } from './attach.ts'
 import { readWorkspaceStatusNames } from './profile.ts'
 import { looksBusy, suggestionOf } from './screen.ts'
 import { applyWorkspaceStatuses, editSyncedColumns, moveWorkspaceCards } from './sync.ts'
-import { changedFiles, changesNote, clipDiff, draftReply, isKorean, judgeArgs, judgePrompt, readJudgeOutput } from './judge.ts'
+import { changedFiles, changesNote, clipDiff, draftReply, isKorean, judgeArgs, judgePrompt, readJudgeOutput, tailOf } from './judge.ts'
 import { folderIsHere, readTextFile, runTool } from './tools.ts'
 import { GOAL_FILE, parseGoalFile } from './goal.ts'
 import { joinPath } from './cli.ts'
@@ -81,6 +82,10 @@ const PROBE_EVERY_MS = 5000
 const JUDGE = { model: 'sonnet', effort: 'medium', budgetUsd: 0.5 }
 const JUDGE_TIMEOUT_MS = 300_000
 const GIT_TIMEOUT_MS = 15_000
+/** A card's check command (a test run, say) gets this long. */
+const CHECK_TIMEOUT_MS = 300_000
+/** A reply sent from the board reaches the chat before the board hears how its draft was used: the count waits this long. */
+const DROP_AFTER_MS = 3000
 /** How much of a GOAL.md the judge is handed: far more than a checklist needs. */
 const MAX_GOAL_CHARS = 12_000
 
@@ -634,15 +639,28 @@ export default function activate(orca: OrcaWorkerApi): void {
     const notes: JudgeNote[] = [...changes.notes]
     if (!goal) notes.push('no-goal')
     if (Object.values(board.cards).some((c) => c.key !== key && !c.closed && c.worktreeId === card.worktreeId)) notes.push('shared-folder')
+    // Your check command, if the card has one: run here, because the judge can run nothing.
+    let check: JudgeCheck | undefined
+    if (card.verify) {
+      const began = Date.now()
+      try {
+        const ran = await runTool('shell', [card.verify], { cwd: folder, timeoutMs: CHECK_TIMEOUT_MS })
+        check = { command: card.verify, code: ran.code, ms: Date.now() - began, tail: tailOf(`${ran.stdout}${ran.stderr ? `\n${ran.stderr}` : ''}`) }
+      } catch (err) {
+        check = { command: card.verify, code: null, ms: Date.now() - began, tail: (err as Error).message.split('\n')[0] ?? '' }
+      }
+    }
     const run = await runTool('claude', judgeArgs(JUDGE), {
       cwd: folder,
-      input: judgePrompt({ goal, prompt, claim, files: changes.files, diff: changes.diff, diffNote: changesNote(notes) }),
+      input: judgePrompt({ goal, prompt, claim, files: changes.files, diff: changes.diff, diffNote: changesNote(notes), check }),
       timeoutMs: JUDGE_TIMEOUT_MS
     })
     const read = readJudgeOutput(run.stdout)
     const ms = Date.now() - started
-    if (!read.verdict) return { state: 'failed', at: started, error: read.error ?? 'failed', costUsd: read.costUsd, ms, notes }
-    return { state: 'done', at: started, verdict: read.verdict, draft: draftReply(read.verdict, isKorean(goal, prompt)), costUsd: read.costUsd, ms, notes }
+    // What is kept of the check is enough to show; the judge had the longer end of it.
+    const kept = check ? { ...check, tail: check.tail.slice(-1500) } : undefined
+    if (!read.verdict) return { state: 'failed', at: started, error: read.error ?? 'failed', costUsd: read.costUsd, ms, notes, ...(kept ? { check: kept } : {}) }
+    return { state: 'done', at: started, verdict: read.verdict, draft: draftReply(read.verdict, isKorean(goal, prompt)), costUsd: read.costUsd, ms, notes, ...(kept ? { check: kept } : {}) }
   }
 
   /** Starts a review and answers at once; its result reaches the panels with a board update. */
@@ -848,6 +866,11 @@ export default function activate(orca: OrcaWorkerApi): void {
           : visible.has(key) && !board.cards[key]?.watch
             ? board
             : markUnseen(board, [key], receivedAt)
+      // The chat went on while a drafted reply was on offer: unless the board hears within a moment
+      // that the reply just sent was that draft, it was not used.
+      if (state === 'working' && prev?.state !== 'working' && board.cards[key]?.judge?.draft && !board.cards[key]?.judge?.used) {
+        setTimeout(() => void mutate((s) => dropUnusedDraft(s, key)).catch(() => undefined), DROP_AFTER_MS)
+      }
       // You started talking to a Backlog chat (not a loop waking up by itself): it is in progress now.
       if (state === 'working' && prev?.state !== 'working' && !(await liveMonitor(terminalId)) && (await autoMoveOn())) {
         next = startInProgress(next, key)

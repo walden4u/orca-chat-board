@@ -1,6 +1,6 @@
 // The judge: a second Claude, read-only, that checks a chat's work against what was asked and
 // drafts the reply you might send next. Pure: what to ask it and how to read its answer.
-import type { JudgeCriterion, JudgeFinding, JudgeNote, JudgeVerdict } from './protocol.ts'
+import type { JudgeCheck, JudgeCriterion, JudgeFinding, JudgeNote, JudgeVerdict } from './protocol.ts'
 
 export type JudgeInput = {
   /** The goal the work is held against: the contents of GOAL.md in the chat's folder, if it has one. */
@@ -15,6 +15,8 @@ export type JudgeInput = {
   diff: string | null
   /** Caveats about the changes, in words for the judge. */
   diffNote: string | null
+  /** The card's check command, as the board just ran it in this folder. */
+  check?: JudgeCheck | null
 }
 
 export type JudgeRun = { verdict: JudgeVerdict | null; costUsd: number | null; error: string | null }
@@ -114,6 +116,26 @@ export function changesNote(notes: readonly JudgeNote[]): string | null {
   return said.length ? said.map((s) => `(${s})`).join('\n') : null
 }
 
+/** The end of what a command printed: where a test run says how it went. */
+export function tailOf(output: string, max = 6000): string {
+  const text = output.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').trimEnd()
+  return text.length > max ? `[the first ${text.length - max} characters are left out]\n${text.slice(-max)}` : text
+}
+
+function checkPart(check: JudgeCheck): string {
+  const how = check.code === null ? 'It did not finish.' : `Exit code ${check.code}.`
+  return [
+    '## The check command',
+    '',
+    `The owner's command to tell whether the work holds, run in this folder just now (not by the agent): \`${check.command}\``,
+    `${how} The end of what it printed:`,
+    '',
+    check.tail || '(nothing)',
+    '',
+    'This output is evidence, and the only thing here that was actually run. A check that failed or did not finish is a must-fix, with the lines that say why. A check that passed does not replace reading the files for what it does not cover.'
+  ].join('\n')
+}
+
 /** The task as the judge reads it. */
 export function judgePrompt(input: JudgeInput): string {
   const part = (title: string, body: string | null, none: string) => `## ${title}\n\n${body?.trim() ? clip(body.trim()) : none}`
@@ -126,6 +148,7 @@ export function judgePrompt(input: JudgeInput): string {
     part('The goal (GOAL.md in this folder)', input.goal, '(This folder has no GOAL.md. Judge against the request below.)'),
     part('The last request to the agent', input.prompt, '(Not known.)'),
     part('What the agent says it did', input.claim, '(The agent left no message.)'),
+    ...(input.check ? [checkPart(input.check)] : []),
     `## What changed\n\n${changes || '(Nothing is known about what changed. Find the relevant files from the goal and the request.)'}`,
     [
       '## How to review',

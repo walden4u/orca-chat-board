@@ -838,6 +838,7 @@ function fakeJudge(answer: () => string | Promise<string>, folderIsHere = true) 
       toolCalls.push({ tool, args, cwd: run.cwd, input: run.input })
       const ok = (stdout: string) => ({ stdout, stderr: '', code: 0 })
       if (tool === 'claude') return ok(await answer())
+      if (tool === 'shell') return ok('')
       // Every git call leaves the folder's index alone.
       assert.equal(args[0], '--no-optional-locks')
       const git = args.slice(1).join(' ')
@@ -857,7 +858,7 @@ function fakeJudge(answer: () => string | Promise<string>, folderIsHere = true) 
 
 /** The card once `ready` holds for it (a review's result arrives a moment after it is asked for). */
 async function cardWhen(worker: Mounted, key: string, ready: (card: CardView) => boolean): Promise<CardView> {
-  for (let i = 0; i < 400; i++) {
+  for (let i = 0; i < 1000; i++) {
     const card = ((await worker.request('board.get', {})) as BoardView).cards.find((c) => c.key === key)
     if (card && ready(card)) return card
     await new Promise((done) => setTimeout(done, 5))
@@ -992,10 +993,34 @@ test('how a drafted reply was used is counted once, and a draft never used count
   await worker.request('judge.tally', { key: 'tab1', how: 'edited' })
   const used = await cardWhen(worker, 'tab1', (c) => !!c.drafts)
   assert.deepEqual([used.drafts, used.judge!.used], [{ asIs: 1, edited: 0, dropped: 0 }, true])
-  // A second review, whose draft is never sent, gives way to a third.
+  // A second review, and a third over it: asking again is not turning the draft down.
   await worker.request('judge.run', { key: 'tab1' })
   await cardWhen(worker, 'tab1', (c) => c.judge?.state === 'done' && !c.judge.used)
   await worker.request('judge.run', { key: 'tab1' })
-  assert.deepEqual((await reviewed(worker)).drafts, { asIs: 1, edited: 0, dropped: 1 })
+  await cardWhen(worker, 'tab1', (c) => c.judge?.state === 'done' && !c.judge.used)
+  assert.deepEqual(cardOf(await worker.request('board.get', {})).drafts, { asIs: 1, edited: 0, dropped: 0 })
+  // The chat goes on to another turn with that draft still on offer: it was not used.
+  await worker.emit('agent.status.changed', { workspaceId: null, paneKey: 'term_1', terminalId: 'term_1', state: 'working', receivedAt: 50 })
+  const dropped = await cardWhen(worker, 'tab1', (c) => c.drafts?.dropped === 1)
+  assert.deepEqual([dropped.drafts, dropped.judge!.used], [{ asIs: 1, edited: 0, dropped: 1 }, true])
+  await worker.deactivate()
+})
+
+test('the check command of a card is run in the folder and its output handed to the judge', async () => {
+  const { toolCalls } = fakeJudge(() => answered())
+  const worker = await mountWorker(main, { host: goalMode() })
+  await worker.request('board.get', { refresh: true })
+  const saved = cardOf(await worker.request('card.update', { key: 'tab1', verify: '  mix test  ' }))
+  assert.equal(saved.verify, 'mix test')
+  await worker.request('judge.run', { key: 'tab1' })
+  const judge = (await reviewed(worker)).judge!
+  // The fake shell printed nothing and ended with code 0.
+  assert.deepEqual([judge.check!.command, judge.check!.code], ['mix test', 0])
+  const shell = toolCalls.find((c) => c.tool === 'shell')!
+  assert.deepEqual([shell.args, shell.cwd], [['mix test'], '/Users/me/toolbox'])
+  const judged = toolCalls.find((c) => c.tool === 'claude')!
+  assert.ok(judged.input!.includes('## The check command') && judged.input!.includes('`mix test`') && judged.input!.includes('Exit code 0.'))
+  // Cleared: no command, nothing run.
+  assert.equal(cardOf(await worker.request('card.update', { key: 'tab1', verify: ' ' })).verify, undefined)
   await worker.deactivate()
 })

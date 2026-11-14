@@ -231,7 +231,7 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
   border-top: 1px solid var(--orca-border); }
 .reply-hint { color: var(--orca-muted-foreground); }
 .reply-input { resize: vertical; min-height: 4.4em; max-height: 40vh; line-height: 1.45; }
-.reply-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.reply-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: relative; }
 .reply-status { flex: 1; min-width: 0; color: var(--orca-destructive); word-break: break-word; }
 .reply-screen { border-top: 1px dashed var(--orca-border); padding-top: 8px; }
 .reply-screen pre { margin: 6px 0 0; padding: 8px; border-radius: 4px; overflow-x: auto; white-space: pre;
@@ -255,6 +255,8 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .reply-advice { color: var(--orca-foreground); }
 .reply-advice[hidden] { display: none; }
 .judge-verdict { font-weight: 600; }
+.judge-check { margin: 0 0 4px 1.4em; padding: 6px; border-radius: 4px; background: var(--orca-background); overflow-x: auto; white-space: pre; font-size: 11px; max-height: 14em; }
+.judge-old { align-self: flex-start; padding: 0; text-decoration: underline; }
 .judge-verdict.pass { color: #2fa36b; }
 .judge-verdict.must-fix { color: var(--orca-destructive); }
 .judge-list { display: flex; flex-direction: column; gap: 2px; }
@@ -265,6 +267,17 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .judge-evidence { margin: 0 0 4px 1.4em; color: var(--orca-muted-foreground); white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
 .reply-waiting { flex: none; color: var(--orca-muted-foreground); white-space: nowrap; }
 .reply-next { border-color: var(--orca-border); padding: 3px 10px; }
+/* The goal button whose turn it is. */
+.reply-next.due { border-color: var(--orca-primary); color: var(--orca-foreground); font-weight: 600;
+  background: color-mix(in srgb, var(--orca-primary) 16%, transparent); }
+/* What a button is for, above the row of buttons while the pointer is on it (the row is its frame,
+   so the note has the row's width wherever the button sits). */
+.tip:hover::after, .tip:focus-visible::after {
+  content: attr(data-tip); position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 5;
+  padding: 7px 9px; border-radius: 5px; border: 1px solid var(--orca-border);
+  background: var(--orca-background); color: var(--orca-foreground); box-shadow: 0 4px 14px rgba(0, 0, 0, .4);
+  font-weight: 400; line-height: 1.45; white-space: normal; text-align: left; pointer-events: none;
+}
 .reply-row .primary { padding: 3px 14px; }
 .reply-row .primary:disabled { opacity: .5; cursor: default; }
 

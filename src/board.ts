@@ -188,7 +188,7 @@ export function setColumns(prev: BoardState, columns: Column[]): BoardState {
   return { ...prev, columns: clean, cards }
 }
 
-export function updateCard(prev: BoardState, key: string, patch: { label?: string; note?: string; watch?: boolean }): BoardState {
+export function updateCard(prev: BoardState, key: string, patch: { label?: string; note?: string; watch?: boolean; verify?: string }): BoardState {
   const card = prev.cards[key]
   if (!card) return prev
   const next = { ...card }
@@ -196,6 +196,11 @@ export function updateCard(prev: BoardState, key: string, patch: { label?: strin
   if (typeof patch.note === 'string') next.note = patch.note.slice(0, 2000)
   if (patch.watch === true) next.watch = true
   else if (patch.watch === false) delete next.watch
+  if (typeof patch.verify === 'string') {
+    const verify = patch.verify.replace(/[\r\n]+/g, ' ').trim().slice(0, 500)
+    if (verify) next.verify = verify
+    else delete next.verify
+  }
   return { ...prev, cards: { ...prev.cards, [key]: next } }
 }
 
@@ -206,15 +211,23 @@ function tallied(drafts: DraftTally | undefined, how: keyof DraftTally): DraftTa
 }
 
 /**
- * Puts a review's state on its card. A draft that was offered and never used counts as dropped
- * the moment another review takes its place.
+ * Puts a review's state on its card. Another review over a draft nobody used just takes its place:
+ * asking twice is not turning a draft down (see `dropUnusedDraft`).
  */
 export function setJudge(prev: BoardState, key: string, judge: JudgeState): BoardState {
   const card = prev.cards[key]
   if (!card) return prev
-  const next: StoredCard = { ...card, judge }
-  if (judge.state === 'running' && card.judge?.draft && !card.judge.used) next.drafts = tallied(card.drafts, 'dropped')
-  return { ...prev, cards: { ...prev.cards, [key]: next } }
+  return { ...prev, cards: { ...prev.cards, [key]: { ...card, judge } } }
+}
+
+/**
+ * The chat went on to another turn while a drafted reply was still on offer: the draft was not
+ * used. Counted once; answers `prev` when there is no such draft.
+ */
+export function dropUnusedDraft(prev: BoardState, key: string): BoardState {
+  const card = prev.cards[key]
+  if (!card?.judge?.draft || card.judge.used) return prev
+  return { ...prev, cards: { ...prev.cards, [key]: { ...card, judge: { ...card.judge, used: true }, drafts: tallied(card.drafts, 'dropped') } } }
 }
 
 /** You answered after a review: counts how its draft was used, once per review. */

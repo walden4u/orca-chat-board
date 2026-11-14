@@ -7,7 +7,7 @@ import { STATUS_ICON, type StatusKind } from './icons.ts'
 import { locale, setLanguage, t } from './i18n.ts'
 import { isStale } from '../src/monitor.ts'
 import { hidePreview, schedulePreview } from './preview.ts'
-import { closeReply, openReply, replyKey, setReplyJudge, setReplyWaiting } from './reply.ts'
+import { closeReply, openReply, replyKey, setReplyChat, setReplyJudge, setReplyWaiting } from './reply.ts'
 
 const INTERRUPTED = new Set(['interruption', 'failure', 'cancellation'])
 
@@ -218,10 +218,21 @@ function showFlash(msg: string, good = false): void {
 function setView(next: BoardView | null): void {
   if (next) view = next
   render()
-  // A review of the chat whose reply box is open started or came in: the box shows it.
+  // The box that is open follows its chat: a turn that ends or starts there, a goal item ticked,
+  // a review that started or came in. Without this it would go on saying "working" over an old
+  // exchange until it was closed and opened again.
   const open = replyKey()
   const card = open ? view?.cards.find((c) => c.key === open) : null
-  if (goalMode && open && card) setReplyJudge(open, card.judge ?? null, card.drafts ?? null)
+  if (open && card) {
+    setReplyChat(open, { working: statusOf(card) === 'working', turnAt: card.stateAt, goalFile: goalMode ? card.goalFile : null })
+    if (goalMode) setReplyJudge(open, card.judge ?? null, card.drafts ?? null)
+    // A turn that ended while you had this chat's box open has been seen there.
+    if (card.unseenAt && card.unseenAt !== readHere.get(card.key)) {
+      readHere.set(card.key, card.unseenAt)
+      card.unseenAt = null
+      void request<BoardView>('card.seen', { key: card.key }).then((v) => setView(v))
+    }
+  }
   openNextWaiting()
 }
 
@@ -564,9 +575,13 @@ function renderEditor(c: CardView): HTMLElement {
   label.value = current
   const note = el('textarea', { rows: '3', placeholder: t.noteHint, 'aria-label': t.note })
   note.value = c.note
+  // Goal mode: the command a review runs first in this chat's folder (a test run, say).
+  const verify = goalMode && !c.closed ? el('input', { placeholder: t.verifyHint, 'aria-label': t.verify, title: t.verifyTitle }) : null
+  if (verify) verify.value = c.verify ?? ''
   const save = async () => {
     editingCard = null
-    const patch: { key: string; note: string; label?: string } = { key: c.key, note: note.value }
+    const patch: { key: string; note: string; label?: string; verify?: string } = { key: c.key, note: note.value }
+    if (verify && verify.value.trim() !== (c.verify ?? '')) patch.verify = verify.value
     if (label.value.trim() !== current) patch.label = label.value
     if (patch.label !== undefined) {
       const card = view?.cards.find((x) => x.key === c.key)
@@ -589,12 +604,13 @@ function renderEditor(c: CardView): HTMLElement {
   }
   label.onkeydown = onKey
   note.onkeydown = onKey
+  if (verify) verify.onkeydown = onKey
   const ok = el('button', { class: 'primary' }, t.save)
   ok.onclick = () => void save()
   const no = el('button', { class: 'ghost' }, t.cancel)
   no.onclick = cancel
   setTimeout(() => label.focus())
-  return el('div', { class: 'edit' }, label, note, el('div', { class: 'edit-actions' }, no, ok))
+  return el('div', { class: 'edit' }, label, note, verify, el('div', { class: 'edit-actions' }, no, ok))
 }
 
 function clearDropMarks(): void {

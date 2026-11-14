@@ -79,11 +79,15 @@ const sent = new Map<string, { text: string; at: number }>()
 const carries = (text: string, draft: string) => draft.split('\n').some((line) => /^\d+\. /.test(line) && text.includes(line.trim()))
 
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+/** What changes about a chat while its box is open: a turn starts or ends, a goal item gets ticked. */
+export type ReplyLive = { working: boolean; turnAt: number | null; goalFile: GoalFile | null }
+
 let current: {
   key: string
   shut: () => void
   setWaiting: (n: number) => void
   setJudge: (judge: JudgeState | null, tally: DraftTally | null) => void
+  setChat: (live: ReplyLive) => void
 } | null = null
 
 /** The chat whose box is open, if any. */
@@ -99,9 +103,27 @@ export function setReplyWaiting(n: number): void {
   current?.setWaiting(n)
 }
 
+/**
+ * The chat whose box is open moved on (its agent finished or started a turn, or ticked an item of
+ * its goal): the box follows, without touching what you are typing.
+ */
+export function setReplyChat(key: string, live: ReplyLive): void {
+  if (current?.key === key) current.setChat(live)
+}
+
 /** The review of the chat whose box is open changed (it started, or its result is in). */
 export function setReplyJudge(key: string, judge: JudgeState | null, tally: DraftTally | null): void {
   if (current?.key === key) current.setJudge(judge, tally)
+}
+
+/**
+ * Says what a button is for and when to press it, in a note that shows above the buttons while
+ * the pointer is on it. (A `title` takes a second to show and is easy to miss.)
+ */
+function tip(button: HTMLElement, text: string): void {
+  button.classList.add('tip')
+  button.dataset.tip = text
+  button.setAttribute('aria-description', text)
 }
 
 /** The scorecard of a review: what the judge checked, what it says must be fixed, and what it was not shown. */
@@ -122,6 +144,11 @@ function scorecard(judge: JudgeState, tally: DraftTally | null, stale: boolean, 
   if (stale) out.push(line('reply-hint', t.judgeStale))
   if (v.summary) out.push(line('preview-text', v.summary))
   for (const note of judge.notes ?? []) out.push(line('reply-hint', t.judgeNotes[note] ?? note))
+  if (judge.check) {
+    const c = judge.check
+    out.push(line(`judge-item ${c.code === 0 ? 'pass' : 'fail'}`, t.verifyRan(c.command, c.code, Math.round(c.ms / 1000))))
+    if (c.code !== 0 && c.tail) out.push(node('pre', 'judge-check', c.tail))
+  }
   const list = node('div', 'judge-list')
   for (const c of v.criteria) {
     const row = node('div', `judge-item ${c.pass ? 'pass' : 'fail'}`)
@@ -188,8 +215,15 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // The goal is shown where the work is read and reviewed: the checklist in the chat's folder, as
   // far as the agent has ticked it. It is what a run works through and what a review checks.
   const goalBox = node('div', 'reply-goal')
-  const goal = target.goalFile
-  if (goal) {
+  // These three follow the chat while the box is open (setChat): whether its agent is working,
+  // when its current state began, and its goal's checklist.
+  let working = target.working
+  let turnAt = target.turnAt
+  let goal = target.goalFile
+  const showGoal = () => {
+    goalBox.replaceChildren()
+    goalBox.hidden = !goal
+    if (!goal) return
     goalBox.append(node('div', 'preview-who', `${t.goalFile} · ${t.goalProgress(goal.done, goal.total)}`))
     if (goal.title) goalBox.append(node('div', 'preview-text', goal.title))
     const list = node('div', 'judge-list')
@@ -201,12 +235,17 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     if (goal.items.length) goalBox.append(list)
     if (goal.total > goal.items.length) goalBox.append(node('div', 'reply-hint', t.goalMore(goal.total - goal.items.length)))
   }
-  goalBox.hidden = !goal
+  showGoal()
   body.append(exchange, goalBox, judgeBox)
 
   const foot = node('div', 'reply-foot')
-  const hint = target.chatTab ? t.replyChatTab : target.blocked ? t.replyBlocked : target.working ? t.replyWorking : ''
-  if (hint) foot.append(node('div', 'reply-hint', hint))
+  const hint = node('div', 'reply-hint')
+  const showHint = () => {
+    hint.textContent = target.chatTab ? t.replyChatTab : target.blocked ? t.replyBlocked : working ? t.replyWorking : ''
+    hint.hidden = !hint.textContent
+  }
+  showHint()
+  foot.append(hint)
   /** The one next step, in words: what is in the field and what Enter does, or that a review is due. */
   const advice = node('div', 'reply-hint reply-advice')
   advice.hidden = true
@@ -226,13 +265,13 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // Goal mode: split what is in the field into a checklist (GOAL.md), run that checklist to its
   // end (`/goal`), and have the work reviewed. Each is one prompt to the agent, or one review.
   const split = node('button', 'ghost reply-next', t.goalSplit)
-  split.title = t.goalSplitHint
+  tip(split, t.goalSplitHint)
   split.hidden = !target.canGoal
   const run = node('button', 'ghost reply-next', t.goalRun)
-  run.title = t.goalRunHint
+  tip(run, t.goalRunHint)
   run.hidden = !target.canGoal
   const review = node('button', 'ghost reply-next', t.judge)
-  review.title = t.judgeHint
+  tip(review, t.judgeHint)
   review.hidden = !target.canJudge
   const send = node('button', 'primary', t.send)
   send.disabled = readOnly
@@ -262,24 +301,22 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // replaces it and Enter sends it. Nothing goes out unless you send it.
   let filled = ''
   /** A review of an earlier turn is still worth reading, but its draft answers that turn, not this one. */
-  const isStale = () => !!judge && judge.state === 'done' && target.turnAt !== null && judge.at < target.turnAt
-  /** The one next step, said in words: what Enter would send, or which button comes next for this goal. */
+  const isStale = () => !!judge && judge.state === 'done' && turnAt !== null && judge.at < turnAt
+  /**
+   * What stands out is what comes next. A line above the field only when the field was filled for
+   * you (it says what Enter would send); otherwise the goal button whose turn it is: Plan goal
+   * while the folder has no checklist, Run goal while items are left and the agent has stopped,
+   * Review once every item is ticked and this turn has no review yet.
+   */
   const advise = () => {
-    const goalLeft = goal ? goal.total - goal.done : 0
-    advice.textContent = readOnly
-      ? ''
-      : filled && input.value === filled
-        ? t.draftInField
-        : !target.canGoal || target.working || judge?.state === 'running'
-          ? ''
-          : !goal || goal.total === 0
-            ? t.goalAdviceSplit
-            : goalLeft > 0
-              ? t.goalAdviceRun(goalLeft)
-              : !judge || isStale()
-                ? t.goalAdviceReview
-                : ''
+    advice.textContent = !readOnly && filled && input.value === filled ? t.draftInField : ''
     advice.hidden = !advice.textContent
+    const idle = target.canGoal && !working && judge?.state !== 'running'
+    const planned = !!goal && goal.total > 0
+    const left = goal ? goal.total - goal.done : 0
+    split.classList.toggle('due', idle && !planned)
+    run.classList.toggle('due', idle && planned && left > 0)
+    review.classList.toggle('due', idle && planned && left === 0 && (!judge || isStale()))
   }
   const fill = () => {
     const text = draft
@@ -290,6 +327,11 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       // Room to read what is about to go out, within reason.
       input.rows = Math.min(10, Math.max(3, text.split('\n').length + 1))
       if (document.activeElement === input) input.select()
+    } else if (!text && filled && input.value === filled) {
+      // What was put there answered a turn that is over: it leaves as it came, unless you touched it.
+      input.value = ''
+      filled = ''
+      input.rows = 3
     }
     advise()
   }
@@ -297,14 +339,28 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     if (filled && input.value === filled) input.select()
   })
   input.addEventListener('input', advise)
+  /** You asked to see the review of an earlier turn in full. */
+  let oldShown = false
+  let tallyNow: DraftTally | null = null
   const showJudge = (nextJudge: JudgeState | null, tally: DraftTally | null) => {
     judge = nextJudge
+    tallyNow = tally
     const running = judge?.state === 'running'
     const stale = isStale()
     draft = !readOnly && !stale && judge?.state === 'done' && judge.draft && !judge.used ? judge.draft : null
     review.disabled = running
     review.textContent = running ? t.judgeRunning : t.judge
-    judgeBox.replaceChildren(...(judge ? scorecard(judge, tally, stale, !!draft) : []))
+    if (judge && stale && !oldShown) {
+      // The chat has moved on since this review: one line that it exists, not the whole scorecard
+      // again every time the box opens.
+      const kept = judge
+      const more = node('button', 'ghost judge-old', t.judgeOld(clock(kept.at)))
+      more.onclick = () => {
+        oldShown = true
+        showJudge(kept, tally)
+      }
+      judgeBox.replaceChildren(more)
+    } else judgeBox.replaceChildren(...(judge ? scorecard(judge, tally, stale, !!draft) : []))
     judgeBox.hidden = !judge
     offer()
     fill()
@@ -391,7 +447,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     shutBox()
     then()
   }
-  current = { key: target.key, shut: shutBox, setWaiting, setJudge: showJudge }
+  current = { key: target.key, shut: shutBox, setWaiting, setJudge: showJudge, setChat: (live) => setChat(live) }
 
   /**
    * Sends what is in the field, or `prepared`: a prompt one of the goal buttons made. `keepField`:
@@ -554,7 +610,8 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   if (target.auto) dialog.addEventListener('pointerdown', engage, true)
   else engage()
 
-  void loadPreview(target.key, true).then(
+  const loadExchange = () =>
+    void loadPreview(target.key, true).then(
     (data) => {
       if (!open) return
       if (data.suggestion && !readOnly) {
@@ -586,4 +643,22 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       if (open) exchange.replaceChildren(node('div', 'preview-text preview-empty', t.previewEmpty))
     }
   )
+  loadExchange()
+
+  // The chat moved on while its box is open. What the box says follows it: whether the agent is
+  // working, the goal's list, which button is due, whether the review is of this turn, and, when
+  // a turn started or ended, the exchange itself. The field and what you typed in it stay as they are.
+  function setChat(live: ReplyLive): void {
+    const turned = live.working !== working || live.turnAt !== turnAt
+    const ticked = live.goalFile?.done !== goal?.done || live.goalFile?.total !== goal?.total
+    if (!open || (!turned && !ticked)) return
+    working = live.working
+    turnAt = live.turnAt
+    goal = live.goalFile
+    showHint()
+    showGoal()
+    showJudge(judge, tallyNow)
+    // Orca's record of the exchange lands a moment after the news that the turn ended.
+    if (turned) setTimeout(() => open && loadExchange(), 700)
+  }
 }
