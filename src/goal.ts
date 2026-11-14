@@ -6,6 +6,7 @@ export const GOAL_FILE = 'GOAL.md'
 
 const MAX_ITEMS = 40
 const MAX_TEXT = 160
+const MAX_VERIFY = 300
 
 /** The checklist of a GOAL.md: its title (first line), its items and which of them are ticked. */
 export function parseGoalFile(text: string): GoalFile {
@@ -18,5 +19,13 @@ export function parseGoalFile(text: string): GoalFile {
     const item = /^\s*(?:[-*+]|\d+[.)])\s*\[([ xX])\]\s*(.+)$/.exec(line)
     if (item) items.push({ text: item[2]!.trim().slice(0, MAX_TEXT), done: item[1] !== ' ' })
   }
-  return { title, done: items.filter((i) => i.done).length, total: items.length, items: items.slice(0, MAX_ITEMS) }
+  // One line `verify: <command>` names the command that checks the whole work (the first such line counts).
+  let verify = ''
+  for (const line of lines) {
+    const found = /^\s*verify:\s*(.+?)\s*$/i.exec(line)
+    if (!found) continue
+    verify = found[1]!.replace(/^`(.*)`$/, '$1').trim().slice(0, MAX_VERIFY)
+    break
+  }
+  return { title, done: items.filter((i) => i.done).length, total: items.length, items: items.slice(0, MAX_ITEMS), ...(verify ? { verify } : {}) }
 }

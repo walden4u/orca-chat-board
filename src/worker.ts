@@ -639,15 +639,17 @@ export default function activate(orca: OrcaWorkerApi): void {
     const notes: JudgeNote[] = [...changes.notes]
     if (!goal) notes.push('no-goal')
     if (Object.values(board.cards).some((c) => c.key !== key && !c.closed && c.worktreeId === card.worktreeId)) notes.push('shared-folder')
-    // Your check command, if the card has one: run here, because the judge can run nothing.
+    // The check command GOAL.md names (its `verify:` line, written by the agent with the plan):
+    // run here, because the judge can run nothing.
     let check: JudgeCheck | undefined
-    if (card.verify) {
+    const command = goalText !== null ? parseGoalFile(goalText).verify : undefined
+    if (command) {
       const began = Date.now()
       try {
-        const ran = await runTool('shell', [card.verify], { cwd: folder, timeoutMs: CHECK_TIMEOUT_MS })
-        check = { command: card.verify, code: ran.code, ms: Date.now() - began, tail: tailOf(`${ran.stdout}${ran.stderr ? `\n${ran.stderr}` : ''}`) }
+        const ran = await runTool('shell', [command], { cwd: folder, timeoutMs: CHECK_TIMEOUT_MS })
+        check = { command, code: ran.code, ms: Date.now() - began, tail: tailOf(`${ran.stdout}${ran.stderr ? `\n${ran.stderr}` : ''}`) }
       } catch (err) {
-        check = { command: card.verify, code: null, ms: Date.now() - began, tail: (err as Error).message.split('\n')[0] ?? '' }
+        check = { command, code: null, ms: Date.now() - began, tail: (err as Error).message.split('\n')[0] ?? '' }
       }
     }
     const run = await runTool('claude', judgeArgs(JUDGE), {

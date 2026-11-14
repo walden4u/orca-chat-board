@@ -38,3 +38,9 @@ test('a long list is counted whole and shown in part', () => {
   assert.deepEqual([goal.done, goal.total, goal.items.length], [50, 60, 40])
   assert.equal(goal.items[0]!.text.length, 160)
 })
+
+test('a verify line names the command that checks the whole work', () => {
+  assert.equal(parseGoalFile('# Goal\n- [ ] 1. a\n  Check: mix test test/a.exs\n\nverify: `cd todo_app && mix test`\n').verify, 'cd todo_app && mix test')
+  assert.equal(parseGoalFile('- [ ] a\nVerify: npm test \nverify: other').verify, 'npm test')
+  assert.equal('verify' in parseGoalFile('- [ ] a\n  Check: verify: nothing here is at the start'), false)
+})

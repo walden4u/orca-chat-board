@@ -188,7 +188,7 @@ export function setColumns(prev: BoardState, columns: Column[]): BoardState {
   return { ...prev, columns: clean, cards }
 }
 
-export function updateCard(prev: BoardState, key: string, patch: { label?: string; note?: string; watch?: boolean; verify?: string }): BoardState {
+export function updateCard(prev: BoardState, key: string, patch: { label?: string; note?: string; watch?: boolean }): BoardState {
   const card = prev.cards[key]
   if (!card) return prev
   const next = { ...card }
@@ -196,11 +196,6 @@ export function updateCard(prev: BoardState, key: string, patch: { label?: strin
   if (typeof patch.note === 'string') next.note = patch.note.slice(0, 2000)
   if (patch.watch === true) next.watch = true
   else if (patch.watch === false) delete next.watch
-  if (typeof patch.verify === 'string') {
-    const verify = patch.verify.replace(/[\r\n]+/g, ' ').trim().slice(0, 500)
-    if (verify) next.verify = verify
-    else delete next.verify
-  }
   return { ...prev, cards: { ...prev.cards, [key]: next } }
 }
 

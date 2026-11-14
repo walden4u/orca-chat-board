@@ -575,13 +575,9 @@ function renderEditor(c: CardView): HTMLElement {
   label.value = current
   const note = el('textarea', { rows: '3', placeholder: t.noteHint, 'aria-label': t.note })
   note.value = c.note
-  // Goal mode: the command a review runs first in this chat's folder (a test run, say).
-  const verify = goalMode && !c.closed ? el('input', { placeholder: t.verifyHint, 'aria-label': t.verify, title: t.verifyTitle }) : null
-  if (verify) verify.value = c.verify ?? ''
   const save = async () => {
     editingCard = null
-    const patch: { key: string; note: string; label?: string; verify?: string } = { key: c.key, note: note.value }
-    if (verify && verify.value.trim() !== (c.verify ?? '')) patch.verify = verify.value
+    const patch: { key: string; note: string; label?: string } = { key: c.key, note: note.value }
     if (label.value.trim() !== current) patch.label = label.value
     if (patch.label !== undefined) {
       const card = view?.cards.find((x) => x.key === c.key)
@@ -604,13 +600,12 @@ function renderEditor(c: CardView): HTMLElement {
   }
   label.onkeydown = onKey
   note.onkeydown = onKey
-  if (verify) verify.onkeydown = onKey
   const ok = el('button', { class: 'primary' }, t.save)
   ok.onclick = () => void save()
   const no = el('button', { class: 'ghost' }, t.cancel)
   no.onclick = cancel
   setTimeout(() => label.focus())
-  return el('div', { class: 'edit' }, label, note, verify, el('div', { class: 'edit-actions' }, no, ok))
+  return el('div', { class: 'edit' }, label, note, el('div', { class: 'edit-actions' }, no, ok))
 }
 
 function clearDropMarks(): void {

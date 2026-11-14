@@ -234,6 +234,8 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     }
     if (goal.items.length) goalBox.append(list)
     if (goal.total > goal.items.length) goalBox.append(node('div', 'reply-hint', t.goalMore(goal.total - goal.items.length)))
+    // What a review will run first: the command the agent named in the file.
+    if (goal.verify && target.canJudge) goalBox.append(node('div', 'reply-hint', t.verifyAuto(goal.verify)))
   }
   showGoal()
   body.append(exchange, goalBox, judgeBox)
@@ -650,7 +652,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // a turn started or ended, the exchange itself. The field and what you typed in it stay as they are.
   function setChat(live: ReplyLive): void {
     const turned = live.working !== working || live.turnAt !== turnAt
-    const ticked = live.goalFile?.done !== goal?.done || live.goalFile?.total !== goal?.total
+    const ticked = live.goalFile?.done !== goal?.done || live.goalFile?.total !== goal?.total || live.goalFile?.verify !== goal?.verify
     if (!open || (!turned && !ticked)) return
     working = live.working
     turnAt = live.turnAt

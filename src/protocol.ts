@@ -55,7 +55,14 @@ export type JudgeCheck = { command: string; code: number | null; ms: number; tai
  * A chat's goal as its folder holds it: the checklist in GOAL.md, which the agent writes and ticks
  * off. Read from the file at each listing, never stored on the card.
  */
-export type GoalFile = { title: string | null; done: number; total: number; items: { text: string; done: boolean }[] }
+export type GoalFile = {
+  title: string | null
+  done: number
+  total: number
+  items: { text: string; done: boolean }[]
+  /** The file's `verify:` line: the one command the agent named to check the whole work. */
+  verify?: string
+}
 
 /** How you used the replies the judge drafted for a chat. */
 export type DraftTally = { asIs: number; edited: number; dropped: number }
@@ -83,11 +90,6 @@ export type StoredCard = {
   unseenAt?: number | null
   /** You checked this chat: when its agent finishes unseen, the panel opens its reply box by itself. */
   watch?: boolean
-  /**
-   * A command of yours that tells whether the work holds (`mix test`, say). With goal mode on, a
-   * review runs it in the chat's folder first and hands its output to the judge, who cannot run anything.
-   */
-  verify?: string
   judge?: JudgeState
   drafts?: DraftTally
   addedAt: number
@@ -146,7 +148,7 @@ export type MonitorInfo = {
   label: string | null
 }
 
-export type CardPatch = { key: string; label?: string; note?: string; watch?: boolean; verify?: string }
+export type CardPatch = { key: string; label?: string; note?: string; watch?: boolean }
 
 declare module 'orca' {
   interface PluginRequests {

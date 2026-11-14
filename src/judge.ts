@@ -127,7 +127,7 @@ function checkPart(check: JudgeCheck): string {
   return [
     '## The check command',
     '',
-    `The owner's command to tell whether the work holds, run in this folder just now (not by the agent): \`${check.command}\``,
+    `The command GOAL.md names to tell whether the work holds, run in this folder just now (not by the agent): \`${check.command}\`. The agent whose work you judge chose it: if it does not really test the goal, say so and do not lean on it.`,
     `${how} The end of what it printed:`,
     '',
     check.tail || '(nothing)',

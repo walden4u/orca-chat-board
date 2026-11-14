@@ -242,7 +242,7 @@ When something must be fixed, the **reply drafted from it is put in the field**,
 
 **A judge can be wrong.** How this one was checked, and where it failed, is written up in [`docs/auto-reply-research.md`](docs/auto-reply-research.md) (in Korean). That is why its reply is a draft. The board counts what you do with the drafts of each chat (sent as they were, edited, not used) and shows the count under the scorecard. A draft counts as not used when the chat goes on to another turn without it; asking for another review does not count.
 
-**A check command (optional).** The judge can read files but cannot run anything. In goal mode the card's editor (✎) has a **Check command** field, for example `mix test`. A review then runs that command in the chat's folder first (up to 5 minutes) and gives the judge its exit code and the end of its output; the scorecard shows the command and how it ended. The command runs with your account, as if you had typed it in a terminal, so write only what you would run yourself.
+**The check command.** The judge can read files but cannot run anything. So the agent ends `GOAL.md` with a line `verify: <command>` (usually the test suite), and a review runs that command in the chat's folder first (up to 5 minutes) and gives the judge its exit code and the end of its output. The box shows the command under the goal's list, and the scorecard shows how it ended. The judge is told that the agent chose the command. It runs with your account, as the agent's own commands do; to change or remove it, edit that line of `GOAL.md`. A `GOAL.md` without the line gets a review without a check.
 
 ### What it costs
 
@@ -388,7 +388,7 @@ Orca asks you to approve these when you load the plugin. Here is what each one i
 | `orca terminal close --tab` | you click ▾ on a card, then confirm | Closing that chat's tab, which stops the agent in it. |
 | `orca agent launch`, then `orca terminal send` with `/resume` | you click ↻ Continue on an archived card | Starting Claude in that workspace with its list of conversations. |
 | `orca worktree list`, `orca worktree set --workspace-status` | the Workspace Board sync is on | Reading every workspace's status, and setting one when you drag a card. |
-| the card's check command, through `cmd.exe /d /s /c` (`/bin/sh -c` elsewhere) | a review starts, on a card where you wrote one | Whatever you wrote in the card's Check command field, in the chat's folder, with your account. Nothing runs when the field is empty. |
+| the `verify:` line of `GOAL.md`, through `cmd.exe /d /s /c` (`/bin/sh -c` elsewhere) | a review starts, when `GOAL.md` has that line | The command the agent wrote there with the plan, in the chat's folder, with your account. Nothing runs without the line. |
 | `git rev-parse`, `git log`, `git status`, `git diff`, `git show`, `git cat-file` | a review starts | Which commit added `GOAL.md`, and what changed in the chat's folder since. Git only reads: it runs with `--no-optional-locks`, so it does not even refresh the index. |
 | `claude -p --restricted --tools Read,Grep,Glob …` | you click Review | The judge: Claude Code without a screen, in the chat's folder, with the three reading tools only, your settings files and hooks left out, and its session not saved. |
 

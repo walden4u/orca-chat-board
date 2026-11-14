@@ -1006,21 +1006,24 @@ test('how a drafted reply was used is counted once, and a draft never used count
   await worker.deactivate()
 })
 
-test('the check command of a card is run in the folder and its output handed to the judge', async () => {
-  const { toolCalls } = fakeJudge(() => answered())
+test('a review runs the check command GOAL.md names and hands its output to the judge', async () => {
+  const { toolCalls, files } = fakeJudge(() => answered())
   const worker = await mountWorker(main, { host: goalMode() })
+  files.goal = `${GOAL}\nverify: cd app && mix test\n`
   await worker.request('board.get', { refresh: true })
-  const saved = cardOf(await worker.request('card.update', { key: 'tab1', verify: '  mix test  ' }))
-  assert.equal(saved.verify, 'mix test')
   await worker.request('judge.run', { key: 'tab1' })
-  const judge = (await reviewed(worker)).judge!
+  const check = (await reviewed(worker)).judge!.check!
   // The fake shell printed nothing and ended with code 0.
-  assert.deepEqual([judge.check!.command, judge.check!.code], ['mix test', 0])
+  assert.deepEqual([check.command, check.code], ['cd app && mix test', 0])
   const shell = toolCalls.find((c) => c.tool === 'shell')!
-  assert.deepEqual([shell.args, shell.cwd], [['mix test'], '/Users/me/toolbox'])
-  const judged = toolCalls.find((c) => c.tool === 'claude')!
-  assert.ok(judged.input!.includes('## The check command') && judged.input!.includes('`mix test`') && judged.input!.includes('Exit code 0.'))
-  // Cleared: no command, nothing run.
-  assert.equal(cardOf(await worker.request('card.update', { key: 'tab1', verify: ' ' })).verify, undefined)
+  assert.deepEqual([shell.args, shell.cwd], [['cd app && mix test'], '/Users/me/toolbox'])
+  const judged = toolCalls.find((c) => c.tool === 'claude')!.input!
+  assert.ok(judged.includes('## The check command') && judged.includes('Exit code 0.') && judged.includes('The agent whose work you judge chose it'))
+  // A goal file without the line: nothing is run.
+  files.goal = GOAL
+  toolCalls.length = 0
+  await worker.request('judge.run', { key: 'tab1' })
+  await cardWhen(worker, 'tab1', (c) => c.judge?.state === 'done' && !c.judge.check)
+  assert.equal(toolCalls.some((c) => c.tool === 'shell'), false)
   await worker.deactivate()
 })
