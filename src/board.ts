@@ -188,13 +188,7 @@ export function setColumns(prev: BoardState, columns: Column[]): BoardState {
   return { ...prev, columns: clean, cards }
 }
 
-export const MAX_GOAL_CHARS = 4000
-
-export function updateCard(
-  prev: BoardState,
-  key: string,
-  patch: { label?: string; note?: string; watch?: boolean; goal?: string; goalSent?: boolean }
-): BoardState {
+export function updateCard(prev: BoardState, key: string, patch: { label?: string; note?: string; watch?: boolean }): BoardState {
   const card = prev.cards[key]
   if (!card) return prev
   const next = { ...card }
@@ -202,26 +196,7 @@ export function updateCard(
   if (typeof patch.note === 'string') next.note = patch.note.slice(0, 2000)
   if (patch.watch === true) next.watch = true
   else if (patch.watch === false) delete next.watch
-  if (typeof patch.goal === 'string') {
-    const goal = patch.goal.trim().slice(0, MAX_GOAL_CHARS)
-    // Other words are another goal as far as the chat knows: it has not been sent these.
-    if (goal !== (card.goal ?? '')) delete next.goalSent
-    if (goal) next.goal = goal
-    else {
-      // No goal, no starting point for one either: the next goal starts from where the folder is then.
-      delete next.goal
-      delete next.goalBase
-    }
-  }
-  if (patch.goalSent === true && next.goal) next.goalSent = true
   return { ...prev, cards: { ...prev.cards, [key]: next } }
-}
-
-/** Remembers the commit a chat's folder was at when its goal was written (null: no git history). */
-export function setGoalBase(prev: BoardState, key: string, base: string | null): BoardState {
-  const card = prev.cards[key]
-  if (!card || !card.goal) return prev
-  return { ...prev, cards: { ...prev.cards, [key]: { ...card, goalBase: base } } }
 }
 
 function tallied(drafts: DraftTally | undefined, how: keyof DraftTally): DraftTally {

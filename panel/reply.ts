@@ -1,7 +1,7 @@
 // Reply box: a card's whole last exchange (your prompt, the agent's reply) with a field to answer
 // it. Send types your text into that chat's terminal as the next prompt; nothing is sent before.
 // The box lives outside the board, so the board's redraws never touch what you are typing.
-import type { DraftTally, JudgeState } from '../src/protocol.ts'
+import type { DraftTally, GoalFile, JudgeState } from '../src/protocol.ts'
 import { t } from './i18n.ts'
 import { loadPreview, plain } from './preview.ts'
 
@@ -9,9 +9,12 @@ export type ReplyTarget = {
   key: string
   title: string
   workspace: string
-  /** The card's goal, and whether you already sent it to this chat from the board. */
-  goal: string | null
-  goalSent: boolean
+  /** The review feature is on (a setting): the box has its Review button. */
+  canJudge: boolean
+  /** Goal mode, for an agent that has `/goal` (Claude Code in a terminal): the box can split a goal and run it. */
+  canGoal: boolean
+  /** The checklist in the chat's folder (GOAL.md), if it has one. */
+  goalFile: GoalFile | null
   /** The last review of this chat's work, if any, and how its drafts were used so far. */
   judge: JudgeState | null
   tally: DraftTally | null
@@ -182,10 +185,23 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   exchange.append(node('div', 'preview-text preview-empty', t.replyLoading))
   const judgeBox = node('div', 'reply-judge')
   judgeBox.hidden = true
-  // The goal is shown where the work is read and reviewed: it is what the review holds the work against.
+  // The goal is shown where the work is read and reviewed: the checklist in the chat's folder, as
+  // far as the agent has ticked it. It is what a run works through and what a review checks.
   const goalBox = node('div', 'reply-goal')
-  if (target.goal) goalBox.append(node('div', 'preview-who', t.goal), node('div', 'preview-text', target.goal))
-  goalBox.hidden = !target.goal
+  const goal = target.goalFile
+  if (goal) {
+    goalBox.append(node('div', 'preview-who', `${t.goalFile} · ${t.goalProgress(goal.done, goal.total)}`))
+    if (goal.title) goalBox.append(node('div', 'preview-text', goal.title))
+    const list = node('div', 'judge-list')
+    for (const item of goal.items) {
+      const row = node('div', `judge-item${item.done ? ' pass' : ''}`)
+      row.append(node('span', 'judge-mark', item.done ? '✓' : '☐'), node('span', 'judge-what', item.text))
+      list.append(row)
+    }
+    if (goal.items.length) goalBox.append(list)
+    if (goal.total > goal.items.length) goalBox.append(node('div', 'reply-hint', t.goalMore(goal.total - goal.items.length)))
+  }
+  goalBox.hidden = !goal
   body.append(exchange, goalBox, judgeBox)
 
   const foot = node('div', 'reply-foot')
@@ -207,12 +223,21 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   status.setAttribute('role', 'status')
   const next = node('button', 'ghost reply-next', t.next)
   next.title = t.nextHint
+  // Goal mode: split what is in the field into a checklist (GOAL.md), run that checklist to its
+  // end (`/goal`), and have the work reviewed. Each is one prompt to the agent, or one review.
+  const split = node('button', 'ghost reply-next', t.goalSplit)
+  split.title = t.goalSplitHint
+  split.hidden = !target.canGoal
+  const run = node('button', 'ghost reply-next', t.goalRun)
+  run.title = t.goalRunHint
+  run.hidden = !target.canGoal
   const review = node('button', 'ghost reply-next', t.judge)
   review.title = t.judgeHint
+  review.hidden = !target.canJudge
   const send = node('button', 'primary', t.send)
   send.disabled = readOnly
   const row = node('div', 'reply-row')
-  row.append(status, review, next, send)
+  row.append(split, run, review, status, next, send)
   foot.append(shelf, input, row)
 
   dialog.append(head, body, foot)
@@ -233,29 +258,31 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   const offer = () => {
     input.placeholder = draft ? t.judgeDraftHint : suggestion ? t.replySuggestion(suggestion) : t.replyPlaceholder
   }
-  // What goes out next is put in the empty field for you: the goal while the agent has not been
-  // given it, then the reply drafted from each review. It is selected, so typing replaces it and
-  // Enter sends it. Nothing goes out unless you send it.
+  // The reply drafted from a review is put in the empty field for you. It is selected, so typing
+  // replaces it and Enter sends it. Nothing goes out unless you send it.
   let filled = ''
-  const goalPrompt = target.goal && !target.goalSent && !target.working && !readOnly ? t.goalPrompt(target.goal) : null
   /** A review of an earlier turn is still worth reading, but its draft answers that turn, not this one. */
   const isStale = () => !!judge && judge.state === 'done' && target.turnAt !== null && judge.at < target.turnAt
+  /** The one next step, said in words: what Enter would send, or which button comes next for this goal. */
   const advise = () => {
-    const untouched = !!filled && input.value === filled
+    const goalLeft = goal ? goal.total - goal.done : 0
     advice.textContent = readOnly
       ? ''
-      : untouched && filled === draft
+      : filled && input.value === filled
         ? t.draftInField
-        : untouched && filled === goalPrompt
-          ? t.goalInField
-          : target.goal && target.goalSent && !target.working && judge?.state !== 'running' && (!judge || isStale())
-            ? t.judgeDue
-            : ''
+        : !target.canGoal || target.working || judge?.state === 'running'
+          ? ''
+          : !goal || goal.total === 0
+            ? t.goalAdviceSplit
+            : goalLeft > 0
+              ? t.goalAdviceRun(goalLeft)
+              : !judge || isStale()
+                ? t.goalAdviceReview
+                : ''
     advice.hidden = !advice.textContent
   }
   const fill = () => {
-    // The goal is offered until a review has spoken: from then on its draft is the next word.
-    const text = draft ?? (!judge || judge.state === 'failed' ? goalPrompt : null)
+    const text = draft
     // Never over what you typed: into an empty field, or over an earlier fill you left as it was.
     if (text && (!input.value || input.value === filled)) {
       input.value = text
@@ -366,8 +393,12 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   }
   current = { key: target.key, shut: shutBox, setWaiting, setJudge: showJudge }
 
-  const submit = async () => {
-    const text = input.value.trim()
+  /**
+   * Sends what is in the field, or `prepared`: a prompt one of the goal buttons made. `keepField`:
+   * the prompt was not made of the field's text, so what you typed there stays for this chat.
+   */
+  const submit = async (prepared?: string, keepField = false) => {
+    const text = prepared ?? input.value.trim()
     if (busy || readOnly || (!text && !pictures.length) || pictures.some((p) => !p.ready)) return
     busy = true
     send.disabled = true
@@ -389,13 +420,9 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
         const how = text === draft.trim() ? 'asIs' : carries(text, draft) ? 'edited' : 'dropped'
         void orca.plugin.request('judge.tally', { key: target.key, how }).catch(() => undefined)
       }
-      // The goal went to the chat: the field stops offering it.
-      if (target.goal && !target.goalSent && text.includes(target.goal)) {
-        void orca.plugin.request('card.update', { key: target.key, goalSent: true }).catch(() => undefined)
-      }
       // The worker has the pictures now: nothing to forget there.
       for (const p of [...pictures]) removePicture(p, false)
-      input.value = ''
+      if (!keepField) input.value = ''
       shutBox()
       handlers.onSent(target.title)
       return
@@ -436,6 +463,25 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   toChat.onclick = () => leave(handlers.onOpenChat)
   next.onclick = () => leave(handlers.onNext)
   send.onclick = () => void submit()
+  // Split: the goal you typed goes to the agent as a request to write it down as a checklist with
+  // a way to check each item, and to build nothing yet. You read the file before anything runs.
+  split.onclick = () => {
+    const wanted = input.value.trim()
+    if (!wanted || wanted === filled) {
+      status.textContent = t.goalSplitEmpty
+      input.focus()
+      return
+    }
+    void submit(t.goalSplitPrompt(wanted))
+  }
+  // Run: Claude Code's own `/goal` keeps the agent at the checklist until every item is ticked.
+  run.onclick = () => {
+    if (!goal || goal.total === 0) {
+      status.textContent = t.goalRunNoFile
+      return
+    }
+    void submit(t.goalRunCommand, true)
+  }
   // Double-click on a card: its first click opened this box, its second one arrives here.
   // Only for a box that a card click opened (see `fromCard`).
   backdrop.addEventListener(
@@ -487,7 +533,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     }
     // Enter sends, Shift+Enter adds a line. While an IME composes (Korean, Japanese…), Enter
     // belongs to the IME: it confirms the word and must not send (keyCode 229 in older engines).
-    // A held key is not a decision: the Enter that saved a goal and opened this box must not also send.
+    // A held key is not a decision: one Enter, one message.
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229 || e.repeat) return
     e.preventDefault()
     void submit()

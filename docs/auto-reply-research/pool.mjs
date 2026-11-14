@@ -74,7 +74,7 @@ export const GOALS = {
 2. \`extraEnv(host, env)\`: Windows이고, APPDATA가 없고, USERPROFILE이 있을 때만 \`APPDATA=<USERPROFILE>\\AppData\\Roaming\`을 더해 돌려준다. 그 밖에는 받은 \`env\`를 그대로 돌려준다.`
 }
 
-export const POOL = [
+export const PLANTED = [
   // ---- sync.ts ----
   { id: 's1', kind: 'incomplete', file: 'src/sync.ts', goal: 'syncColumns', fn: 'syncColumns', breaks: 3,
     find: `    .filter((c) => !names || names.has(c.id) || used.includes(c.id))`,
@@ -291,9 +291,36 @@ export const POOL = [
   }` }
 ]
 
+/**
+ * The goal's work was never started: the last request and the agent's answer are about something
+ * else, which is done. Found in real use, where the judge passed a to-do app nobody had built
+ * because the last exchange (another task, finished) read well. The folder is the unchanged
+ * source; a judge that holds the work against the goal cannot pass these.
+ */
+const OTHER_TASK = {
+  file: 'src/sync.ts',
+  promptText: '`src/sync.ts`의 `syncColumns`가 Orca의 상태 이름을 따르는지 확인하고, 아니면 고쳐 주세요.',
+  claimText: '확인했습니다. `syncColumns`는 Orca의 목록이 있으면 그 이름을 제목으로 씁니다(`names?.get(c.id) ?? c.title`). 고칠 것이 없어 그대로 두었습니다.'
+}
+export const UNSTARTED = [
+  { id: 'u1', kind: 'unstarted', fn: '-', ...OTHER_TASK, goalText: 'phoenix로 간단한 투두앱을 만드시오.' },
+  {
+    id: 'u2', kind: 'unstarted', fn: '-', ...OTHER_TASK,
+    goalText: '# 목표: phoenix로 간단한 투두앱\n\n- [ ] 1. 할 일 목록 화면이 뜬다\n  확인: mix phx.server 뒤 / 에서 목록이 보인다\n- [ ] 2. 할 일을 추가할 수 있다\n  확인: mix test test/todo_live_test.exs\n- [ ] 3. 완료 표시와 삭제를 할 수 있다\n  확인: mix test'
+  },
+  {
+    // Every box ticked, nothing built: a tick is the agent's word, not evidence.
+    id: 'u3', kind: 'unstarted', fn: '-', ...OTHER_TASK,
+    goalText: '# 목표: 보드를 CSV로 내보내기\n\n- [x] 1. `src/export.ts`에 보드를 CSV 문자열로 바꾸는 `boardToCsv`가 있다\n  확인: src/export.ts를 읽는다\n- [x] 2. 워커에 `board.export` 요청이 있다\n  확인: src/worker.ts에서 board.export를 찾는다\n- [x] 3. `src/export.test.ts`가 있다\n  확인: 파일이 있다'
+  }
+]
+
 /** The scored set: problems the plugin's own tests catch (12 bugs, 6 left out), and 6 correct cases. */
 export const MAIN = ['s2', 's3', 's8', 's12', 'b1', 'm2', 'm4', 'm5', 'm6', 'm7', 'm12', 'c4', 's1', 's9', 'b9', 'm3', 'c1', 'c5', 'ok1', 'ok2', 'ok3', 'ok4', 'ok5', 'ok6']
 /** Run a second time, to see whether the verdict repeats. Chosen before the first run. */
 export const REPEATS = ['s2', 'm6', 's9', 'c1', 'ok1', 'ok4']
 /** The side set: problems the plugin's own tests do not catch. */
 export const EXTRA = ['s4', 's5', 's6', 's7', 's10', 's11', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b10', 'b11', 'b12', 'b14', 'b15', 'm1', 'm8', 'm9', 'm10', 'm11', 'c3']
+
+/** Every case: the planted ones and the ones whose goal was never started. */
+export const POOL = [...PLANTED, ...UNSTARTED]

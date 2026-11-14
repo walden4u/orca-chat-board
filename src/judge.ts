@@ -3,7 +3,7 @@
 import type { JudgeCriterion, JudgeFinding, JudgeNote, JudgeVerdict } from './protocol.ts'
 
 export type JudgeInput = {
-  /** The card's goal, as you wrote it. */
+  /** The goal the work is held against: the contents of GOAL.md in the chat's folder, if it has one. */
   goal: string | null
   /** Your last prompt in that chat: what this turn was asked to do. */
   prompt: string | null
@@ -123,19 +123,19 @@ export function judgePrompt(input: JudgeInput): string {
     .join('\n\n')
   return [
     'You are reviewing work that another agent just finished in this folder. You did not see how it was done: judge the result, not the account of it. You can only read (Read, Grep, Glob). Nothing you do changes the folder.',
-    part('The standing goal', input.goal, '(No goal was written for this chat. Judge against the request below.)'),
-    part('The request of this turn', input.prompt, '(Not known.)'),
+    part('The goal (GOAL.md in this folder)', input.goal, '(This folder has no GOAL.md. Judge against the request below.)'),
+    part('The last request to the agent', input.prompt, '(Not known.)'),
     part('What the agent says it did', input.claim, '(The agent left no message.)'),
     `## What changed\n\n${changes || '(Nothing is known about what changed. Find the relevant files from the goal and the request.)'}`,
     [
       '## How to review',
       '',
-      '1. Turn the goal and the request into a short list of criteria. When the goal is a numbered list, use its items, in its order, one criterion per item.',
+      '1. The goal decides. When there is a goal, its items are the criteria: one criterion per item of its list, in its order. A ticked box is the agent saying an item is done, not evidence that it is. The last request is context: what the agent was asked most recently, which may be one step of the goal or something else altogether. Work that answers the last request and leaves an item of the goal undone does not pass. Without a goal, turn the last request into a short list of criteria.',
       "2. Check each criterion in the files yourself. A criterion passes only when you have read the code or text that satisfies it. Follow what the code actually does for the cases the criterion names, edge cases included. Comments, names and the agent's message are claims, not evidence.",
       '3. A must-fix is one of: a criterion that is not met; something that worked and is now broken by the change; a statement by the agent that the files do not bear out. Every must-fix needs evidence: the file, the line, and what happens there. Without evidence it is not a finding.',
       '4. Leave out style, naming, possible improvements and anything nobody asked for. When everything asked for is met, the verdict is "pass" and mustFix is empty. Do not look for something to say.',
       '5. The verdict is "needs-human" only when you cannot tell: the criteria are ambiguous, or the answer depends on something outside this folder.',
-      '6. Write the criteria, the evidence and the findings in the language of the goal and the request.'
+      '6. Language: write everything you answer with (the summary, every criterion, the evidence, the findings) in the language the goal is written in, or the request when there is no goal. A goal in Korean gets an answer in Korean, whatever language the code and this briefing are in.'
     ].join('\n')
   ].join('\n\n')
 }

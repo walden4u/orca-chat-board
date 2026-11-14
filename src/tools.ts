@@ -1,7 +1,7 @@
 // The two other programs the worker starts, besides the orca CLI: Claude Code without a screen
 // (the judge that reviews a chat's work) and git (what changed in the chat's folder).
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { envGet, extraEnv, findOnWindowsPath, joinPath, type OrcaHost } from './cli.ts'
 
 export type Tool = 'claude' | 'git'
@@ -98,13 +98,31 @@ const defaultRunner: ToolRunner = (tool, args, run) => {
   })
 }
 
+const readIfAny = (path: string): string | null => {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return null
+  }
+}
+
 let runner: ToolRunner = defaultRunner
 let folderExists: (path: string) => boolean = existsSync
+let fileReader: (path: string) => string | null = readIfAny
 
-/** Tests swap the programs for a fake, and with them the folders that count as being on this machine. */
-export function setToolRunner(next: ToolRunner | null, exists?: (path: string) => boolean): void {
+/**
+ * Tests swap the programs for a fake, and with them the folders that count as being on this
+ * machine and the files that can be read there.
+ */
+export function setToolRunner(next: ToolRunner | null, exists?: (path: string) => boolean, read?: (path: string) => string | null): void {
   runner = next ?? defaultRunner
   folderExists = next && exists ? exists : existsSync
+  fileReader = next && read ? read : readIfAny
+}
+
+/** A text file's contents, or null when it is not there (or cannot be read). */
+export function readTextFile(path: string): string | null {
+  return fileReader(path)
 }
 
 /** Whether a chat's folder is on this machine (a workspace on a remote host is not). */

@@ -28,8 +28,7 @@ export type JudgeNote = 'no-git' | 'diff-cut' | 'shared-folder' | 'last-commit' 
 
 /**
  * The last review of a chat's work by the judge: a second Claude that can only read the chat's
- * folder. It runs when you ask (or, with the setting on, when a checked chat with a goal finishes)
- * and never sends anything to the chat: its findings are offered as a draft in the reply box.
+ * folder. It runs when you ask, and never sends anything to the chat: its findings are offered as a draft in the reply box.
  */
 export type JudgeState = {
   state: 'running' | 'done' | 'failed'
@@ -46,6 +45,12 @@ export type JudgeState = {
   error?: string
   notes?: JudgeNote[]
 }
+
+/**
+ * A chat's goal as its folder holds it: the checklist in GOAL.md, which the agent writes and ticks
+ * off. Read from the file at each listing, never stored on the card.
+ */
+export type GoalFile = { title: string | null; done: number; total: number; items: { text: string; done: boolean }[] }
 
 /** How you used the replies the judge drafted for a chat. */
 export type DraftTally = { asIs: number; edited: number; dropped: number }
@@ -73,12 +78,6 @@ export type StoredCard = {
   unseenAt?: number | null
   /** You checked this chat: when its agent finishes unseen, the panel opens its reply box by itself. */
   watch?: boolean
-  /** What this chat's work must achieve, in your words: what the judge checks it against. */
-  goal?: string
-  /** The commit the chat's folder was at when the goal was written: the judge is shown what changed since. */
-  goalBase?: string | null
-  /** You sent this goal to the chat from the board: its reply field no longer offers it. Cleared when the goal's words change. */
-  goalSent?: boolean
   judge?: JudgeState
   drafts?: DraftTally
   addedAt: number
@@ -106,6 +105,8 @@ export type CardView = StoredCard & {
   monitor: MonitorInfo | null
   /** The chat's tab is the one on screen in the focused workspace. */
   active: boolean
+  /** The checklist in the chat's folder (GOAL.md), with goal mode on; null without the file or the mode. */
+  goalFile: GoalFile | null
 }
 
 export type BoardView = {
@@ -135,7 +136,7 @@ export type MonitorInfo = {
   label: string | null
 }
 
-export type CardPatch = { key: string; label?: string; note?: string; watch?: boolean; goal?: string; goalSent?: boolean }
+export type CardPatch = { key: string; label?: string; note?: string; watch?: boolean }
 
 declare module 'orca' {
   interface PluginRequests {
@@ -191,9 +192,10 @@ declare module 'orca' {
     /**
      * Starts a review of the chat's work by the judge. Answers at once (a review takes longer than
      * a panel waits); the result arrives on the card (`judge`) with a board update.
-     * `busy`: another review is running. `no-folder`: the chat's folder is not on this machine.
+     * `off`: goal mode is turned off in Settings. `busy`: another review is running.
+     * `no-folder`: the chat's folder is not on this machine.
      */
-    'judge.run': { input: { key: string }; output: { ok: boolean; error: 'closed' | 'busy' | 'no-folder' | string | null } }
+    'judge.run': { input: { key: string }; output: { ok: boolean; error: 'off' | 'closed' | 'busy' | 'no-folder' | string | null } }
     /** How you used the reply the judge drafted: sent as it was, sent after editing, or not used. */
     'judge.tally': { input: { key: string; how: keyof DraftTally }; output: null }
     /** One piece (base64, in order) of a picture attached in the reply box; kept in memory until Send. */

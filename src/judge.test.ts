@@ -28,9 +28,12 @@ test('the judge is asked with the goal, the request, the claim and what changed'
   })
   for (const part of ['1. first', 'do it', 'all done', '- src/a.ts', '+b', 'cut short', 'Other chats work in this folder']) assert.ok(asked.includes(part), part)
   assert.ok(asked.includes('claims, not evidence'))
+  // The goal decides, also when the last request was about something else.
+  assert.ok(asked.includes('The goal decides'))
+  assert.ok(asked.includes('leaves an item of the goal undone does not pass'))
 
   const bare = judgePrompt({ goal: null, prompt: 'do it', claim: null, files: [], diff: null, diffNote: null })
-  assert.ok(bare.includes('No goal was written'))
+  assert.ok(bare.includes('This folder has no GOAL.md'))
   assert.ok(bare.includes('The agent left no message'))
   assert.ok(bare.includes('Nothing is known about what changed'))
 })

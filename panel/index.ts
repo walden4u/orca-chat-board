@@ -81,6 +81,11 @@ let autoCheck = true
 let followChat = false
 /** Setting: checked chats that wait for your answer are drawn pink, and so is the toolbar's edge. */
 let pinkWaiting = false
+/**
+ * Setting: goal mode. On, a chat's box can split a goal into GOAL.md, run it and review the work,
+ * and a card shows its folder's checklist. Off, none of that shows.
+ */
+let goalMode = false
 /** An automatic check is on its way to the worker and back. */
 let checking = false
 /** The automatic check's two paces, and how long it stays at the fast one after you last used the panel. */
@@ -110,6 +115,7 @@ async function loadSettings(): Promise<void> {
     autoCheck = s.autoCheck !== false
     followChat = s.followChat === true
     pinkWaiting = s.pinkWaiting === true
+    goalMode = s.goalMode === true
     setLanguage(s.language)
   } catch {
     // Settings unavailable (older approval): keep everything visible.
@@ -215,7 +221,7 @@ function setView(next: BoardView | null): void {
   // A review of the chat whose reply box is open started or came in: the box shows it.
   const open = replyKey()
   const card = open ? view?.cards.find((c) => c.key === open) : null
-  if (open && card) setReplyJudge(open, card.judge ?? null, card.drafts ?? null)
+  if (goalMode && open && card) setReplyJudge(open, card.judge ?? null, card.drafts ?? null)
   openNextWaiting()
 }
 
@@ -245,6 +251,14 @@ async function setWatch(c: CardView, watch: boolean): Promise<void> {
   else delete c.watch
   render(true)
   setView(await request<BoardView>('card.update', { key: c.key, watch }))
+}
+
+/** Goal mode: how far the checklist in the chat's folder (GOAL.md) is ticked off. */
+function goalChip(c: CardView): HTMLElement | null {
+  const goal = goalMode && !c.closed ? c.goalFile : null
+  if (!goal || goal.total === 0) return null
+  const all = goal.done === goal.total
+  return el('span', { class: `chip goal${all ? ' all' : ''}`, title: goal.title ?? t.goalFile }, t.goalProgress(goal.done, goal.total))
 }
 
 /** The check, at the same place on every open card: a click there checks or unchecks the chat. */
@@ -310,10 +324,13 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' = 'click'): void 
       key: c.key,
       title: titleOf(c),
       workspace: c.worktreeName,
-      goal: c.goal ?? null,
-      goalSent: c.goalSent === true,
-      judge: c.judge ?? null,
-      tally: c.drafts ?? null,
+      // With goal mode off, the box is the plain reply box: no goal, no review, none of their buttons.
+      canJudge: goalMode,
+      // Splitting and running a goal are prompts for Claude Code in a terminal (`/goal` is its command).
+      canGoal: goalMode && c.agent === 'claude' && !c.sessionId,
+      goalFile: goalMode ? c.goalFile : null,
+      judge: goalMode ? (c.judge ?? null) : null,
+      tally: goalMode ? (c.drafts ?? null) : null,
       turnAt: c.stateAt,
       chatTab: !!c.sessionId,
       working: kind === 'working',
@@ -432,6 +449,7 @@ function renderCard(c: CardView): HTMLElement {
       { class: 'card-meta' },
       c.agent && show.agent ? agentBadge(c.agent) : null,
       c.worktreeName && show.workspace ? el('span', { class: 'chip ws' }, c.worktreeName) : null,
+      goalChip(c),
       c.label && c.title && c.label !== c.title ? el('span', {}, c.title) : null,
       show.time && mon ? el('span', { class: `time ${kind}`, title: mon.title }, mon.text) : when && show.time ? el('span', { class: 'time' }, ago(when)) : null
     ),
@@ -546,13 +564,9 @@ function renderEditor(c: CardView): HTMLElement {
   label.value = current
   const note = el('textarea', { rows: '3', placeholder: t.noteHint, 'aria-label': t.note })
   note.value = c.note
-  // The goal: what a review of this chat's work is held against. Open chats only (a review reads the chat's folder).
-  const goal = c.closed ? null : el('textarea', { rows: '3', placeholder: t.goalHint, 'aria-label': t.goal, title: t.goalTitle })
-  if (goal) goal.value = c.goal ?? ''
   const save = async () => {
     editingCard = null
-    const patch: { key: string; note: string; label?: string; goal?: string } = { key: c.key, note: note.value }
-    if (goal && goal.value.trim() !== (c.goal ?? '')) patch.goal = goal.value
+    const patch: { key: string; note: string; label?: string } = { key: c.key, note: note.value }
     if (label.value.trim() !== current) patch.label = label.value
     if (patch.label !== undefined) {
       const card = view?.cards.find((x) => x.key === c.key)
@@ -560,11 +574,6 @@ function renderEditor(c: CardView): HTMLElement {
     }
     render(true)
     setView(await request<BoardView>('card.update', patch))
-    // A goal the agent has not been sent yet: the next step is to send it, and that is done in
-    // this chat's box. It opens with the goal ready in its field, whether the goal is new or was
-    // saved before and never sent.
-    const saved = view?.cards.find((x) => x.key === c.key)
-    if (saved?.goal && !saved.goalSent && !saved.closed && !replyKey()) showReply(saved, 'next')
   }
   const cancel = () => {
     editingCard = null
@@ -580,15 +589,12 @@ function renderEditor(c: CardView): HTMLElement {
   }
   label.onkeydown = onKey
   note.onkeydown = onKey
-  if (goal) goal.onkeydown = onKey
   const ok = el('button', { class: 'primary' }, t.save)
   ok.onclick = () => void save()
   const no = el('button', { class: 'ghost' }, t.cancel)
   no.onclick = cancel
   setTimeout(() => label.focus())
-  // The form is where a goal is written, the reply box is where the work is checked against it: say so here.
-  const where = goal ? el('div', { class: 'edit-hint' }, c.goal && c.goalSent ? t.goalWhereSent : t.goalWhere) : null
-  return el('div', { class: 'edit' }, label, note, goal, where, el('div', { class: 'edit-actions' }, no, ok))
+  return el('div', { class: 'edit' }, label, note, el('div', { class: 'edit-actions' }, no, ok))
 }
 
 function clearDropMarks(): void {
@@ -921,7 +927,7 @@ function boot(): void {
   const liveKey = (v: BoardView | null) =>
     JSON.stringify([
       // The state too: for a chat Orca lost track of, it comes from this check and not from an event.
-      (v?.cards ?? []).map((c) => `${c.key}:${c.active ? 1 : 0}:${c.unseenAt ? 1 : 0}:${c.column}:${c.state}:${c.stateAt}`).sort(),
+      (v?.cards ?? []).map((c) => `${c.key}:${c.active ? 1 : 0}:${c.unseenAt ? 1 : 0}:${c.column}:${c.state}:${c.stateAt}:${c.goalFile ? `${c.goalFile.done}/${c.goalFile.total}` : ''}`).sort(),
       (v?.columns ?? []).map((c) => [c.id, c.title]),
       v?.orcaNames === true
     ])

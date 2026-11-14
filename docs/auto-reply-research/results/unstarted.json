@@ -1,0 +1,131 @@
+[
+ {
+  "id": "u1",
+  "round": 1,
+  "kind": "unstarted",
+  "fn": "-",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 16,
+  "costUsd": 0.0367,
+  "turns": 4,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "마지막 요청(`syncColumns`가 Orca의 상태 이름을 따르는지 확인)은 코드로 확인되며, 에이전트의 설명도 맞습니다. 그러나 목표인 phoenix 투두앱은 폴더에 없습니다. 있는 것은 Orca 플러그인용 TypeScript 파일뿐입니다. `GOAL.md`도 폴더에서 찾지 못했습니다.",
+   "criteria": [
+    {
+     "criterion": "phoenix로 만든 간단한 투두앱이 존재한다",
+     "pass": false,
+     "evidence": "Glob 결과는 orca-plugin.json과 src/*.ts(attach, board, cli, monitor, node.d, profile, protocol, screen, worker, sync)뿐입니다. mix.exs, lib/, *.ex, *.heex 같은 Phoenix 파일이나 투두 코드가 없습니다."
+    },
+    {
+     "criterion": "(마지막 요청) syncColumns가 Orca의 상태 이름을 따른다",
+     "pass": true,
+     "evidence": "src/sync.ts:24에서 statuses로 names 맵을 만들고, src/sync.ts:27에서 `names?.get(c.id) ?? c.title`로 제목을 정합니다. src/sync.ts:34에서 Orca 목록의 열을 추가하고, src/sync.ts:26에서 Orca 목록에서 사라졌고 쓰이지도 않는 열을 제거합니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "목표인 phoenix 투두앱이 폴더에 없음",
+     "file": "src/sync.ts",
+     "line": 1,
+     "evidence": "폴더는 Orca 플러그인용 TypeScript 코드(src/*.ts, orca-plugin.json)뿐이고 Phoenix/Elixir 프로젝트나 투두 기능이 없습니다. 마지막 요청에만 답하고 목표의 항목은 미완으로 남았습니다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "u2",
+  "round": 1,
+  "kind": "unstarted",
+  "fn": "-",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 14,
+  "costUsd": 0.0328,
+  "turns": 4,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "마지막 요청(syncColumns가 Orca 상태 이름을 따르는지)은 코드상 이미 충족되어 있고 에이전트의 설명도 맞습니다. 그러나 GOAL.md의 세 항목(Phoenix 투두앱)은 폴더에 해당 코드가 전혀 없어 모두 충족되지 않았습니다.",
+   "criteria": [
+    {
+     "criterion": "1. 할 일 목록 화면이 뜬다 (mix phx.server 후 / 에서 목록 표시)",
+     "pass": false,
+     "evidence": "폴더에 mix.exs, Phoenix 라우터, LiveView 등이 없습니다. 파일은 src/*.ts와 orca-plugin.json뿐입니다."
+    },
+    {
+     "criterion": "2. 할 일을 추가할 수 있다 (mix test test/todo_live_test.exs)",
+     "pass": false,
+     "evidence": "test/todo_live_test.exs가 없고 추가 기능 코드도 없습니다."
+    },
+    {
+     "criterion": "3. 완료 표시와 삭제를 할 수 있다 (mix test)",
+     "pass": false,
+     "evidence": "Elixir/Phoenix 코드와 테스트가 전혀 없습니다."
+    },
+    {
+     "criterion": "마지막 요청: syncColumns가 Orca 상태 이름을 따른다",
+     "pass": true,
+     "evidence": "src/sync.ts:24, 27, 34에서 statuses가 있으면 Orca 제목을 사용하고 새 상태도 추가합니다. 에이전트의 설명과 일치합니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "GOAL의 Phoenix 투두앱 항목 1~3이 구현되지 않음",
+     "file": "GOAL.md",
+     "evidence": "폴더에 mix.exs, lib/, test/todo_live_test.exs가 없습니다. src/sync.ts 확인은 목표 항목 중 어느 것도 충족하지 않습니다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "u3",
+  "round": 1,
+  "kind": "unstarted",
+  "fn": "-",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 10,
+  "costUsd": 0.0275,
+  "turns": 5,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "목표의 세 항목이 모두 충족되지 않았습니다. 체크박스는 [x]로 표시돼 있지만 폴더에 해당 코드와 파일이 없습니다. 마지막 요청인 `syncColumns` 확인은 맞게 답했습니다.",
+   "criteria": [
+    {
+     "criterion": "1. src/export.ts에 boardToCsv가 있다",
+     "pass": false,
+     "evidence": "src/export.ts 파일이 없습니다. 폴더 전체에서 boardToCsv를 검색해도 결과가 없습니다."
+    },
+    {
+     "criterion": "2. 워커에 board.export 요청이 있다",
+     "pass": false,
+     "evidence": "src/worker.ts가 있지만 board.export는 어느 파일에서도 찾을 수 없습니다."
+    },
+    {
+     "criterion": "3. src/export.test.ts가 있다",
+     "pass": false,
+     "evidence": "파일 목록에 src/export.test.ts가 없습니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "boardToCsv와 src/export.ts가 없음",
+     "evidence": "src 아래 파일은 attach, board, cli, monitor, node.d, profile, protocol, screen, worker, sync뿐입니다. export.ts는 없습니다."
+    },
+    {
+     "title": "board.export 워커 요청이 없음",
+     "file": "src/worker.ts",
+     "evidence": "board.export 문자열이 폴더 어디에도 없습니다."
+    },
+    {
+     "title": "src/export.test.ts가 없음",
+     "evidence": "해당 파일이 존재하지 않습니다."
+    }
+   ]
+  }
+ }
+]

@@ -21,8 +21,9 @@ import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { EXTRA, GOALS, MAIN, POOL, REPEATS } from './pool.mjs'
-import { judgeArgs, judgePrompt, readJudgeOutput } from '../../src/judge.ts'
+import { EXTRA, GOALS, MAIN, POOL, REPEATS, UNSTARTED } from './pool.mjs'
+// JUDGE_MODULE: another version of src/judge.ts (a file URL), to compare what two wordings of the judge's task do.
+const { judgeArgs, judgePrompt, readJudgeOutput } = await import(process.env.JUDGE_MODULE ?? '../../src/judge.ts')
 import { claudeProgram, judgeEnv } from '../../src/tools.ts'
 
 const COMMIT = '5f5e555'
@@ -65,7 +66,8 @@ function planted(c, folder) {
 }
 
 function prep(ids) {
-  for (const c of POOL.filter((c) => !ids.length || ids.includes(c.id))) {
+  // Only planted problems have something for the tests to notice.
+  for (const c of POOL.filter((c) => c.kind !== 'unstarted' && (!ids.length || ids.includes(c.id)))) {
     const path = join(bed, c.file)
     const original = readFileSync(path, 'utf8')
     writeFileSync(path, planted(c, bed))
@@ -80,7 +82,7 @@ function prep(ids) {
 }
 
 function idsOf(set, given) {
-  return given.length ? given : set === 'main' ? MAIN : set === 'extra' ? EXTRA : set === 'repeats' ? REPEATS : []
+  return given.length ? given : set === 'main' ? MAIN : set === 'extra' ? EXTRA : set === 'repeats' ? REPEATS : set === 'unstarted' ? UNSTARTED.map((c) => c.id) : []
 }
 
 async function run(set, round, given) {
@@ -114,9 +116,9 @@ async function run(set, round, given) {
       // is done, and the name of the changed file. There is no git history here, so no diff.
       child.stdin.end(
         judgePrompt({
-          goal: GOALS[c.goal],
-          prompt: `위 목표의 기준을 모두 만족하도록 \`${c.file}\`를 구현해 주세요.`,
-          claim: `\`${c.file}\`에서 목표의 기준을 모두 구현했고, 기준마다 코드를 다시 읽어 확인했습니다. 빠진 것은 없습니다.`,
+          goal: c.goalText ?? GOALS[c.goal],
+          prompt: c.promptText ?? `위 목표의 기준을 모두 만족하도록 \`${c.file}\`를 구현해 주세요.`,
+          claim: c.claimText ?? `\`${c.file}\`에서 목표의 기준을 모두 구현했고, 기준마다 코드를 다시 읽어 확인했습니다. 빠진 것은 없습니다.`,
           files: [c.file],
           diff: null,
           diffNote: '(This folder has no git history, so there is no diff. Read the changed file as it is now.)'
@@ -148,10 +150,11 @@ function verdictsOf(set) {
 
 // The rule, fixed before any run. A planted problem is caught when the verdict is must-fix AND the
 // criterion it breaks is marked as not met (when the judge did not keep the goal's numbering: when
-// a finding names the function). A correct case is a false alarm unless the verdict is pass.
+// a finding names the function). A correct case is a false alarm unless the verdict is pass. A goal
+// that was never started is caught by any verdict of must-fix: there, a pass is the failure.
 function score(set) {
   const byId = new Map(POOL.map((c) => [c.id, c]))
-  const items = (goal) => GOALS[goal].split('\n').filter((l) => /^\d+\. /.test(l)).length
+  const items = (goal) => (goal ? GOALS[goal].split('\n').filter((l) => /^\d+\. /.test(l)).length : -1)
   const rows = verdictsOf(set).map((r) => {
     const c = byId.get(r.id)
     const v = r.verdict
@@ -160,7 +163,9 @@ function score(set) {
     const hit = numbered ? failed.includes(c.breaks) : !!v && v.mustFix.some((m) => `${m.title} ${m.evidence}`.includes(c.fn))
     const result = !v
       ? `error: ${r.error}`
-      : c.kind === 'ok'
+      : c.kind === 'unstarted'
+        ? v.verdict === 'must-fix' ? 'caught' : v.verdict === 'needs-human' ? 'unsure' : 'FALSE PASS'
+        : c.kind === 'ok'
         ? v.verdict === 'pass' ? 'passed' : v.verdict === 'needs-human' ? 'unsure' : 'FALSE ALARM'
         : v.verdict === 'must-fix' && hit ? 'caught' : v.verdict === 'needs-human' ? 'unsure' : v.verdict === 'must-fix' ? 'WRONG REASON' : 'MISSED'
     return { ...r, kind: c.kind, fn: c.fn, result, other: numbered ? failed.filter((n) => n !== c.breaks) : [] }
@@ -183,6 +188,7 @@ function score(set) {
         bugs: `${count('bug', 'caught')}/${total('bug')} caught`,
         incomplete: `${count('incomplete', 'caught')}/${total('incomplete')} caught`,
         correct: `${count('ok', 'passed')}/${total('ok')} passed`,
+        unstarted: `${count('unstarted', 'caught')}/${total('unstarted')} caught`,
         repeatsAgree: `${again.filter(Boolean).length}/${again.length}`,
         secMedian: secs[Math.floor(secs.length / 2)],
         secMax: secs[secs.length - 1],

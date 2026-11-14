@@ -1,0 +1,1384 @@
+[
+ {
+  "id": "b1",
+  "round": 1,
+  "kind": "bug",
+  "fn": "moveCard",
+  "breaks": 1,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 11,
+  "costUsd": 0.0434,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "moveCard는 기준 1을 어깁니다. 카드를 컬럼의 맨 끝에 놓을 수 없습니다. 나머지 기준은 충족합니다.",
+   "criteria": [
+    {
+     "criterion": "1. index 위치에 삽입하고, 범위를 벗어나면 0..(다른 열린 카드 수)로 맞춘다. 맨 끝도 가능해야 한다",
+     "pass": false,
+     "evidence": "src/board.ts:166에서 `Math.min(index, siblings.length - 1)`로 상한을 잡습니다. 상한은 siblings.length여야 합니다. 다른 열린 카드가 3장이면 index 3이나 99가 2로 줄어서 카드가 마지막이 아니라 끝에서 두 번째에 들어갑니다. 맨 끝에 놓는 것이 불가능합니다."
+    },
+    {
+     "criterion": "2. 그 컬럼의 열린 카드들의 order를 0부터 다시 매긴다",
+     "pass": true,
+     "evidence": "src/board.ts:168에서 정렬된 siblings에 카드를 끼워 넣은 뒤 forEach로 order를 i로 매깁니다."
+    },
+    {
+     "criterion": "3. 닫힌 카드는 건드리지 않는다",
+     "pass": true,
+     "evidence": "src/board.ts:164에서 `!c.closed`로 닫힌 카드를 걸러내므로 siblings에 들어가지 않고 order도 바뀌지 않습니다."
+    },
+    {
+     "criterion": "4. 카드나 컬럼이 없으면 prev를 그대로 돌려준다",
+     "pass": true,
+     "evidence": "src/board.ts:161에서 카드가 없거나 컬럼 id가 없으면 `return prev`합니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "index 상한이 off-by-one이라 맨 끝에 놓을 수 없음",
+     "file": "src/board.ts",
+     "line": 166,
+     "evidence": "`const at = Math.max(0, Math.min(index, siblings.length - 1))`는 index를 siblings.length - 1까지만 허용합니다. 목표는 0..siblings.length를 요구합니다. 그래서 index = siblings.length(끝)가 한 칸 앞으로 밀립니다. startInProgress(src/board.ts:262)도 끝 위치를 index로 넘기므로 같은 영향을 받습니다. `Math.min(index, siblings.length)`로 고쳐야 합니다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "b9",
+  "round": 1,
+  "kind": "incomplete",
+  "fn": "deleteCard",
+  "breaks": 2,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 11,
+  "costUsd": 0.0456,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "네 가지 기준 중 `deleteCard`가 기준 2를 어긴다. 열려 있는 카드도 지워 버린다. 나머지 세 가지는 코드를 읽어 확인했다.",
+   "criteria": [
+    {
+     "criterion": "1. startInProgress: 열려 있고 backlog에 있는 카드만 doing 맨 끝으로 이동한다. 그 외에는 prev를 돌려준다.",
+     "pass": true,
+     "evidence": "src/board.ts:257-263에서 카드가 없거나 닫혔거나 backlog가 아니면 prev를 돌려준다. doing 컬럼이 없어도 prev를 돌려준다. 그 외에는 열린 doing 카드 수를 인덱스로 moveCard를 불러 맨 끝에 놓는다."
+    },
+    {
+     "criterion": "2. deleteCard: 닫힌 카드만 지운다. 열린 카드나 없는 카드는 prev를 돌려준다.",
+     "pass": false,
+     "evidence": "src/board.ts:272-278은 카드가 없을 때만 prev를 돌려주고 `card.closed`를 확인하지 않는다. 열려 있는 카드도 지워진다."
+    },
+    {
+     "criterion": "3. adoptCard: 보관된 카드를 새 key로 옮기고 열린 상태로 만든다. 컬럼·메모·체크는 유지한다. 보관된 카드가 아니거나 두 key가 같으면 prev를 돌려준다.",
+     "pass": true,
+     "evidence": "src/board.ts:149-156에서 카드가 없거나 닫히지 않았거나 두 key가 같으면 prev를 돌려준다. 그 외에는 옛 key를 지우고 새 key로 `{...card, key: tabKey, closed:false, closedAt:null, unseenAt:null}`를 넣는다. 나머지 필드는 그대로 유지된다."
+    },
+    {
+     "criterion": "4. cleanTitle: 제목 앞의 작업 표시 글자와 공백을 떼어 낸다. 빈 문자열이 되면 원래 제목을 돌려준다.",
+     "pass": true,
+     "evidence": "src/board.ts:45에서 앞쪽의 공백, 스피너 글리프, 점자 범위를 정규식으로 떼고 trim한다. 결과가 빈 문자열이면 `|| title`로 원래 제목을 돌려준다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "deleteCard가 열려 있는 카드도 지운다",
+     "file": "src/board.ts",
+     "line": 274,
+     "evidence": "`if (!card) return prev`만 있고 `card.closed` 검사가 없다. 열린 카드의 key를 넘기면 275-277행에서 그대로 삭제한다. 목표 2는 열려 있는 카드면 prev를 돌려주라고 한다. `if (!card || !card.closed) return prev`로 바꿔야 한다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "c1",
+  "round": 1,
+  "kind": "incomplete",
+  "fn": "findOnWindowsPath",
+  "breaks": 3,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 12,
+  "costUsd": 0.0521,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "3번 기준의 절반(큰따옴표로 감싼 PATH 항목 처리)이 구현되지 않았습니다. 나머지 기준은 충족합니다.",
+   "criteria": [
+    {
+     "criterion": "1. envGet: Windows에서는 대소문자 무시, 다른 OS에서는 정확히 일치",
+     "pass": true,
+     "evidence": "src/cli.ts:27-32 — win32가 아니면 host.env[name]을 그대로 쓰고, win32이면 키를 대문자로 바꿔 비교합니다."
+    },
+    {
+     "criterion": "2. findOnWindowsPath: 폴더 순서 우선, 폴더 안에서는 PATHEXT 순서로 처음 존재하는 파일 반환",
+     "pass": true,
+     "evidence": "src/cli.ts:62-67 — 바깥 루프가 폴더, 안쪽 루프가 확장자이고 처음 존재하는 경로를 반환합니다."
+    },
+    {
+     "criterion": "3. 큰따옴표로 감싼 PATH 항목 처리, 빈 항목 건너뛰기",
+     "pass": false,
+     "evidence": "src/cli.ts:61 — `.split(';').map((d) => d.trim()).filter(Boolean)`은 공백만 제거하고 따옴표는 벗기지 않습니다. `\"C:\\Tools\"` 항목은 `\"C:\\Tools\"\\orca.exe`로 합쳐져 존재 확인에 실패합니다. 빈 항목 건너뛰기만 구현되어 있습니다. 또한 `\"\"`처럼 따옴표만 있는 항목은 빈 항목으로 처리되지 않습니다."
+    },
+    {
+     "criterion": "4. PATHEXT가 없으면 기본값 .COM;.EXE;.BAT;.CMD, 못 찾으면 null",
+     "pass": true,
+     "evidence": "src/cli.ts:60 — `|| '.COM;.EXE;.BAT;.CMD'` 기본값을 쓰고, src/cli.ts:68에서 null을 반환합니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "PATH 항목의 큰따옴표를 벗기지 않음",
+     "file": "src/cli.ts",
+     "line": 61,
+     "evidence": "항목에 `.trim()`만 적용하고 감싼 큰따옴표를 제거하지 않아, `\"C:\\Tools\"`로 감싼 폴더에서는 실행 파일을 찾지 못합니다. 따옴표만 있는 `\"\"` 항목도 건너뛰지 않습니다. 큰따옴표를 벗긴 뒤 빈 항목을 거르도록 고쳐야 합니다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "c1",
+  "round": 2,
+  "kind": "incomplete",
+  "fn": "findOnWindowsPath",
+  "breaks": 3,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 15,
+  "costUsd": 0.0505,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "항목 3(큰따옴표로 감싼 PATH 항목 처리)이 구현되지 않았습니다. 항목 2에서는 PATHEXT 확장자를 소문자로 바꿔 붙이는 문제도 있습니다. 항목 1과 4는 충족합니다.",
+   "criteria": [
+    {
+     "criterion": "1. envGet: Windows에서는 대소문자 무시, 그 외 OS에서는 정확히 일치",
+     "pass": true,
+     "evidence": "src/cli.ts:27-32. win32가 아니면 host.env[name]을 그대로 쓰고, win32이면 Object.keys에서 toUpperCase로 비교해 찾는다."
+    },
+    {
+     "criterion": "2. findOnWindowsPath: 폴더 순서 우선, 폴더 안에서 PATHEXT 순서대로, 처음 존재하는 파일 반환",
+     "pass": false,
+     "evidence": "src/cli.ts:62-67. 바깥 루프가 폴더, 안쪽 루프가 확장자라서 순서는 맞다. 그러나 64행에서 `name + ext.toLowerCase()`로 확장자를 소문자로 바꿔 붙인다. PATHEXT가 `.EXE`이고 exists가 대소문자를 구분하면(`C:\\bin\\orca.EXE`만 존재) 파일을 찾지 못하거나 반환 경로가 PATHEXT와 달라진다. 목표는 PATHEXT의 확장자를 그대로 붙이라고 한다."
+    },
+    {
+     "criterion": "3. 큰따옴표로 감싼 PATH 항목 처리, 빈 항목 건너뛰기",
+     "pass": false,
+     "evidence": "src/cli.ts:61. `split(';').map(d => d.trim()).filter(Boolean)`만 있고 감싼 큰따옴표를 벗기지 않는다. `\"C:\\Program Files\\x\"` 항목은 따옴표가 붙은 채 joinPath(36행)로 넘어가 `\"C:\\Program Files\\x\\orca.exe`처럼 잘못된 경로가 된다. joinPath도 따옴표를 처리하지 않는다. 따옴표만 있는 `\"\"` 항목도 빈 항목으로 걸러지지 않는다. 빈 항목 건너뛰기는 동작한다."
+    },
+    {
+     "criterion": "4. PATHEXT 없으면 `.COM;.EXE;.BAT;.CMD` 사용, 못 찾으면 null",
+     "pass": true,
+     "evidence": "src/cli.ts:60의 기본값과 68행의 `return null`."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "PATH 항목의 큰따옴표를 벗기지 않음",
+     "file": "src/cli.ts",
+     "line": 61,
+     "evidence": "dirs는 trim과 filter(Boolean)만 거친다. 따옴표로 감싼 폴더는 따옴표가 붙은 채 경로에 들어가 존재 확인에 실패한다. 따옴표를 제거한 뒤 빈 항목을 거르도록 바꿔야 한다."
+    },
+    {
+     "title": "PATHEXT 확장자를 소문자로 바꿔 붙임",
+     "file": "src/cli.ts",
+     "line": 64,
+     "evidence": "`name + ext.toLowerCase()`는 PATHEXT의 확장자를 그대로 붙이지 않는다. 대소문자를 구분하는 exists에서는 `.EXE` 파일을 찾지 못하고, 찾더라도 반환 경로의 확장자가 PATHEXT와 달라진다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "c4",
+  "round": 1,
+  "kind": "bug",
+  "fn": "extraEnv",
+  "breaks": 2,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 12,
+  "costUsd": 0.0526,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "quoteCmdArg는 목표대로 구현됐습니다. extraEnv는 \"APPDATA가 없을 때만\"이라는 조건을 확인하지 않아서 목표를 만족하지 못합니다. 에이전트의 \"빠진 것은 없습니다\"라는 말은 코드와 맞지 않습니다.",
+   "criteria": [
+    {
+     "criterion": "quoteCmdArg: 큰따옴표로 감싸고 메타문자에 ^, batchFile이면 한 번 더, 줄바꿈은 공백",
+     "pass": true,
+     "evidence": "src/cli.ts:120-125에서 줄바꿈을 공백으로 바꾸고, MSVCRT 방식으로 따옴표를 처리한 뒤 `\"${a}\"`에 CMD_META로 `^`를 붙입니다. batchFile이 true면 같은 치환을 한 번 더 합니다(기본값 true). CMD_META 정규식은 cross-spawn과 같습니다."
+    },
+    {
+     "criterion": "extraEnv: Windows이고, APPDATA가 없고, USERPROFILE이 있을 때만 APPDATA를 더하고, 그 밖에는 env를 그대로 돌려준다",
+     "pass": false,
+     "evidence": "src/cli.ts:141-145는 platform과 USERPROFILE만 확인합니다. APPDATA가 이미 있는지는 envGet(host,'APPDATA')로 확인하지 않습니다. 그래서 Windows에서 APPDATA가 이미 설정돼 있어도 APPDATA=<USERPROFILE>\\AppData\\Roaming 을 더해 돌려주고, 기존 값과 다르면 덮어쓰게 됩니다. 이 경우 목표는 받은 env를 그대로 돌려주라고 합니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "extraEnv가 APPDATA가 이미 있는지 확인하지 않음",
+     "file": "src/cli.ts",
+     "line": 143,
+     "evidence": "`if (host.platform !== 'win32' || !profile) return env` 에 APPDATA 존재 검사가 없습니다. host.env에 APPDATA가 있어도 144행에서 `{ APPDATA: ..., ...env }`를 돌려줍니다. 목표는 이때 env를 그대로 돌려주라고 합니다. `|| envGet(host, 'APPDATA')`를 조건에 추가해야 합니다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "c5",
+  "round": 1,
+  "kind": "incomplete",
+  "fn": "quoteCmdArg",
+  "breaks": 1,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 11,
+  "costUsd": 0.0468,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "`extraEnv`는 목표를 만족한다. `quoteCmdArg`는 `batchFile` 인자를 쓰지 않아서, `.cmd`/`.bat`용으로 `^`를 한 번 더 붙이는 기준을 만족하지 못한다. 에이전트의 \"빠진 것은 없습니다\"라는 말은 코드와 맞지 않는다.",
+   "criteria": [
+    {
+     "criterion": "quoteCmdArg: 큰따옴표로 감싸고 cmd 메타문자마다 ^를 붙인다",
+     "pass": true,
+     "evidence": "src/cli.ts:123에서 `\"${a}\"`에 CMD_META 치환 `^$1`을 적용한다. 따옴표 자체도 메타 집합에 들어 있다(112행)."
+    },
+    {
+     "criterion": "quoteCmdArg: batchFile이 true이면 ^를 한 번 더 붙인다",
+     "pass": false,
+     "evidence": "src/cli.ts:120의 `batchFile` 매개변수는 함수 본문에서 쓰이지 않는다. 123행의 ^ 치환은 한 번만 실행되므로 true여도 false와 결과가 같다. 이중 이스케이프가 없다. 배치 파일 경로를 ^ 한 번만 붙이는 130행도 마찬가지다."
+    },
+    {
+     "criterion": "quoteCmdArg: 줄바꿈은 공백으로 바꾼다",
+     "pass": true,
+     "evidence": "src/cli.ts:121의 `.replace(/[\\r\\n]+/g, ' ')`가 처리한다."
+    },
+    {
+     "criterion": "extraEnv: Windows이고 APPDATA가 없고 USERPROFILE이 있을 때만 APPDATA=<USERPROFILE>\\AppData\\Roaming을 더하고, 그 밖에는 env를 그대로 돌려준다",
+     "pass": true,
+     "evidence": "src/cli.ts:143에서 비Windows, APPDATA 있음, USERPROFILE 없음이면 `env`를 그대로 반환한다. 144행은 joinPath로 `\\AppData\\Roaming`을 만들어 env에 합친다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "quoteCmdArg가 batchFile 인자를 무시해 이중 ^ 이스케이프가 없다",
+     "file": "src/cli.ts",
+     "line": 120,
+     "evidence": "`batchFile`이 선언만 되고 쓰이지 않는다. 123행에서 `^` 치환이 한 번만 일어나므로 true일 때도 `\"a&b\"`는 `^\"a^&b^\"`로만 나온다. `.cmd`/`.bat`이면 `^^\"a^^&b^^\"`가 되어야 한다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "m12",
+  "round": 1,
+  "kind": "bug",
+  "fn": "monitorView",
+  "breaks": 4,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 13,
+  "costUsd": 0.025,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "기준 4(monitorView)가 충족되지 않았다. 나머지 1~3은 충족된다.",
+   "criteria": [
+    {
+     "criterion": "1. onRun: lastRunAt=now, 주기가 있으면 nextAt=now+주기*1000",
+     "pass": true,
+     "evidence": "src/monitor.ts:89 — lastRunAt을 now로 두고, everySec가 있으면 now + everySec*1000으로 옮긴다. 없으면 기존 nextAt을 유지한다."
+    },
+    {
+     "criterion": "2. monitorDeadline",
+     "pass": true,
+     "evidence": "src/monitor.ts:94-96 — nextAt이 있으면 nextAt + max(60000, 주기). 없으면 lastRunAt + 2*주기. 주기도 없으면 lastRunAt + 6시간."
+    },
+    {
+     "criterion": "3. 주기 없는 monitor 감시는 마지막 신호 뒤 2시간",
+     "pass": true,
+     "evidence": "src/monitor.ts:102, 109 — kind가 'monitor'이고 everySec가 없으면 lastRunAt + MONITOR_GRACE_MS(2시간)를 쓴다."
+    },
+    {
+     "criterion": "4. monitorView: until이 지나면 null, 신호를 잃은 지 30분이 넘으면 null, 그 밖에는 stale 여부를 붙여 반환",
+     "pass": false,
+     "evidence": "src/monitor.ts:110-111 — stale이면 곧바로 null을 돌려준다. 신호를 잃은 직후부터 사라지고, stale:true 상태로 반환되는 구간이 없다. 30분 유예(FORGET_STALE_MS, 19행)는 선언만 되고 쓰이지 않는다. 올바른 조건은 now > deadline + FORGET_STALE_MS일 때 null이다. 이 이내에서 deadline을 지난 경우는 stale:true로 반환해야 한다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "monitorView가 stale인 monitor를 즉시 null로 돌려주고 30분 유예를 적용하지 않는다",
+     "file": "src/monitor.ts",
+     "line": 111,
+     "evidence": "`if (stale) return null`이라서 deadline을 1ms만 넘겨도 null이 된다. 목표는 신호를 잃은 지 30분이 넘었을 때만 null이고, 그 전에는 stale:true를 붙여 반환하라는 것이다. FORGET_STALE_MS는 어디에서도 사용되지 않는다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "m2",
+  "round": 1,
+  "kind": "bug",
+  "fn": "cronEverySec",
+  "breaks": 2,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 10,
+  "costUsd": 0.027,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "The minute cases work, but the hour cases return wrong values. The agent's claim that every criterion is met is not borne out.",
+   "criteria": [
+    {
+     "criterion": "1. `*/N * * * *` → N*60 seconds, `* * * * *` → 60 seconds",
+     "pass": true,
+     "evidence": "src/monitor.ts:32-33: step('*/N') gives N and step('*') gives 1. With the other fields all `*`, the result is m*60. This is correct."
+    },
+    {
+     "criterion": "2. `M */N * * *` → N*3600 seconds, `M * * * *` → 3600 seconds",
+     "pass": false,
+     "evidence": "src/monitor.ts:36 returns `h * 60`, not `h * 3600`. `0 */2 * * *` therefore gives 120 instead of 7200. `0 * * * *` gives 60 instead of 3600, because step('*') is 1 and 1*60 = 60."
+    },
+    {
+     "criterion": "3. Any other shape (non-`*` remaining fields, fewer than 5 fields, anything else) → null",
+     "pass": true,
+     "evidence": "Fewer than 5 fields returns null (line 29). `allRest` rejects non-`*` remaining fields. Other shapes fall through to null on line 38. Expressions with more than 5 fields are not rejected, but the goal does not say how to handle them."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "Hour cron expressions return minutes-scale seconds",
+     "file": "src/monitor.ts",
+     "line": 36,
+     "evidence": "`return h * 60` should be `h * 3600`. `M */N * * *` returns N*60 instead of N*3600. `M * * * *` returns 60 instead of 3600."
+    }
+   ]
+  }
+ },
+ {
+  "id": "m3",
+  "round": 1,
+  "kind": "incomplete",
+  "fn": "applyToolCall",
+  "breaks": 1,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 11,
+  "costUsd": 0.0301,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "1번 기준의 `stop: true` 처리가 구현되어 있지 않습니다. 나머지 기준은 충족합니다. \"빠진 것은 없습니다\"라는 에이전트의 말은 파일과 맞지 않습니다.",
+   "criteria": [
+    {
+     "criterion": "1. ScheduleWakeup: stop:true면 null, 아니면 loop 감시(주기 delaySeconds, nextAt = now + 주기)",
+     "pass": false,
+     "evidence": "src/monitor.ts:49-59의 ScheduleWakeup 분기는 input.stop을 읽지 않습니다. stop:true여도 loop 감시 객체를 반환하며 null을 반환하는 경로가 없습니다. 아닌 경우의 loop 생성과 nextAt = now + delay*1000은 맞습니다."
+    },
+    {
+     "criterion": "2. CronCreate는 cron 감시 생성, CronDelete는 prev가 cron일 때만 null, 아니면 undefined",
+     "pass": true,
+     "evidence": "src/monitor.ts:60-66에서 kind 'cron'을 반환하고, CronDelete는 `prev?.kind === 'cron' ? null : undefined`입니다."
+    },
+    {
+     "criterion": "3. Monitor는 monitor 감시 생성, timeout_ms가 있고 persistent가 true가 아니면 until = now + timeout + 60000, 아니면 null",
+     "pass": true,
+     "evidence": "src/monitor.ts:69-77에서 `timeoutMs && input.persistent !== true ? now + timeoutMs + 60_000 : null`로 처리합니다."
+    },
+    {
+     "criterion": "4. TaskStop/KillShell/KillBash는 prev가 monitor일 때만 null, 아니면 undefined",
+     "pass": true,
+     "evidence": "src/monitor.ts:13과 81-82에서 STOP_TOOLS에 속하고 prev?.kind === 'monitor'이면 null, 아니면 undefined를 반환합니다."
+    },
+    {
+     "criterion": "5. 그 밖의 도구는 undefined, since는 이전 감시 값 유지",
+     "pass": true,
+     "evidence": "src/monitor.ts:82의 default는 undefined를 반환하고, 47행의 `since = prev?.since ?? now`가 각 분기에서 쓰입니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "ScheduleWakeup의 stop:true가 감시를 지우지 않음",
+     "file": "src/monitor.ts",
+     "line": 49,
+     "evidence": "ScheduleWakeup 분기(49-59행)에 input.stop 검사가 없어, stop:true인 호출도 loop 감시를 새로 만들고 null을 반환하지 않습니다. 분기 시작에서 `input.stop === true`이면 null을 반환해야 합니다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "m4",
+  "round": 1,
+  "kind": "bug",
+  "fn": "applyToolCall",
+  "breaks": 2,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 12,
+  "costUsd": 0.0256,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "CronDelete는 감시 종류를 확인하지 않고 항상 null을 반환해 기준 2의 후반부를 어긴다. 나머지 기준은 충족한다.",
+   "criteria": [
+    {
+     "criterion": "1. ScheduleWakeup: stop이면 null, 아니면 loop 감시, 주기 delaySeconds, nextAt = now+주기",
+     "pass": true,
+     "evidence": "src/monitor.ts:49-60 — stop===true면 null, 아니면 kind 'loop', everySec=delay, nextAt=now+delay*1000."
+    },
+    {
+     "criterion": "2. CronCreate는 cron 감시를 만들고, CronDelete는 cron일 때만 null, 아니면 undefined",
+     "pass": false,
+     "evidence": "CronCreate(61-65)는 맞다. 그러나 src/monitor.ts:66-67의 CronDelete는 prev?.kind를 확인하지 않고 무조건 null을 반환한다. prev가 monitor나 loop여도 지워지고, prev가 null이어도 undefined 대신 null이 나온다."
+    },
+    {
+     "criterion": "3. Monitor: monitor 감시, timeout_ms가 있고 persistent가 true가 아니면 until = now+timeout+60000, 그 밖에는 null",
+     "pass": true,
+     "evidence": "src/monitor.ts:70-77 — timeoutMs && input.persistent !== true ? now + timeoutMs + 60_000 : null."
+    },
+    {
+     "criterion": "4. TaskStop/KillShell/KillBash는 현재 감시가 monitor일 때만 null, 아니면 undefined",
+     "pass": true,
+     "evidence": "src/monitor.ts:82-83 — STOP_TOOLS에 있고 prev?.kind === 'monitor'일 때만 null, 아니면 undefined."
+    },
+    {
+     "criterion": "5. 그 밖의 도구는 undefined, since는 이전 감시 값을 유지",
+     "pass": true,
+     "evidence": "src/monitor.ts:47 since = prev?.since ?? now이고 생성 분기에서 모두 사용한다. default는 undefined를 반환한다(83)."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "CronDelete가 현재 감시 종류와 무관하게 항상 null 반환",
+     "file": "src/monitor.ts",
+     "line": 66,
+     "evidence": "`case 'CronDelete': return null` — 목표는 지금 감시가 cron일 때만 null, 아니면 undefined를 요구한다. `prev?.kind === 'cron' ? null : undefined`가 필요하다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "m5",
+  "round": 1,
+  "kind": "bug",
+  "fn": "applyToolCall",
+  "breaks": 3,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 11,
+  "costUsd": 0.0242,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "항목 3의 `until` 조건이 반대로 구현되어 있습니다. 나머지 항목은 충족합니다.",
+   "criteria": [
+    {
+     "criterion": "1. ScheduleWakeup",
+     "pass": true,
+     "evidence": "monitor.ts:50 `stop===true`이면 null. 아니면 loop 감시를 만들고 everySec=delaySeconds, nextAt=now+delay*1000 (51-59행)."
+    },
+    {
+     "criterion": "2. CronCreate / CronDelete",
+     "pass": true,
+     "evidence": "61-65행이 cron 감시를 만든다. 66-67행은 prev가 cron일 때만 null, 아니면 undefined."
+    },
+    {
+     "criterion": "3. Monitor와 until",
+     "pass": false,
+     "evidence": "77행 `timeoutMs && input.persistent === true ? now + timeoutMs + 60_000 : null`. 조건이 반대다. persistent가 true일 때 until이 설정되고, persistent가 아닐 때(목표가 until을 요구하는 경우)는 null이 된다."
+    },
+    {
+     "criterion": "4. TaskStop/KillShell/KillBash",
+     "pass": true,
+     "evidence": "82행 STOP_TOOLS에 속하고 prev.kind==='monitor'이면 null, 아니면 undefined."
+    },
+    {
+     "criterion": "5. 그 밖의 도구 / since 유지",
+     "pass": true,
+     "evidence": "83행 undefined 반환. 47행 `since = prev?.since ?? now`를 각 감시에 넣는다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "Monitor의 until 조건이 반대로 되어 있음",
+     "file": "src/monitor.ts",
+     "line": 77,
+     "evidence": "`input.persistent === true`일 때 until이 now+timeout+60000이 된다. 목표는 timeout_ms가 있고 persistent가 true가 아닐 때 이 값을 두라고 한다. `input.persistent !== true`여야 한다. 지금은 persistent가 아닌 타임아웃 감시의 until이 null이 되어 만료 처리가 되지 않고, persistent 감시는 오히려 종료 시각이 잡힌다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "m6",
+  "round": 1,
+  "kind": "bug",
+  "fn": "monitorDeadline",
+  "breaks": 2,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 11,
+  "costUsd": 0.0275,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "기준 2가 지켜지지 않았다. 나머지는 충족한다.",
+   "criteria": [
+    {
+     "criterion": "1. onRun",
+     "pass": true,
+     "evidence": "monitor.ts:89 lastRunAt=now이고, everySec가 있으면 nextAt=now+everySec*1000, 없으면 기존 nextAt을 유지한다."
+    },
+    {
+     "criterion": "2. monitorDeadline",
+     "pass": false,
+     "evidence": "monitor.ts:95 Math.min(60_000, 주기*1000)을 쓴다. 요구는 max(1분, 주기)다. 주기가 10분이면 여유가 1분이 되어 10분이어야 할 때보다 일찍 stale이 된다. 이 값은 isStale과 monitorView에도 쓰인다. 그 아래 분기(마지막 실행 + 주기×2, 없으면 6시간)는 맞다."
+    },
+    {
+     "criterion": "3. 주기 없는 monitor 감시 2시간",
+     "pass": true,
+     "evidence": "monitor.ts:102와 109에서 kind==='monitor'이고 everySec가 없으면 lastRunAt+2시간을 마감으로 쓴다."
+    },
+    {
+     "criterion": "4. monitorView",
+     "pass": true,
+     "evidence": "monitor.ts:108 until이 지났으면 null을 돌려준다. 111에서 마감 후 30분이 넘으면 null이고, 그 밖에는 stale을 붙여 돌려준다. 다만 마감이 2번의 오류를 이어받는다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "monitorDeadline이 max 대신 min을 사용",
+     "file": "src/monitor.ts",
+     "line": 95,
+     "evidence": "`m.nextAt + Math.min(60_000, (m.everySec ?? 60) * 1000)`. 목표는 nextAt + max(1분, 주기)이므로 Math.max(60_000, (m.everySec ?? 0) * 1000)로 해야 한다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "m6",
+  "round": 2,
+  "kind": "bug",
+  "fn": "monitorDeadline",
+  "breaks": 2,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 9,
+  "costUsd": 0.0206,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "monitorDeadline의 nextAt 분기가 목표와 다르다(min vs max). 나머지 기준은 충족.",
+   "criteria": [
+    {
+     "criterion": "1. onRun",
+     "pass": true,
+     "evidence": "monitor.ts:89 lastRunAt=now, 주기가 있으면 nextAt=now+everySec*1000, 없으면 기존 nextAt 유지."
+    },
+    {
+     "criterion": "2. monitorDeadline",
+     "pass": false,
+     "evidence": "monitor.ts:95 Math.min(60_000, everySec*1000)를 쓴다. 목표는 max(1분, 주기)다. 주기가 600초이면 nextAt+60초가 되어 nextAt+10분이어야 할 때보다 일찍 stale 처리된다. nextAt 없는 분기(96행)는 맞다(2배 주기 / 6시간)."
+    },
+    {
+     "criterion": "3. 주기 없는 monitor 감시 2시간",
+     "pass": true,
+     "evidence": "monitor.ts:102, 109에서 kind==='monitor' && !everySec이면 lastRunAt+2시간을 쓴다."
+    },
+    {
+     "criterion": "4. monitorView",
+     "pass": true,
+     "evidence": "monitor.ts:108 until이 지났으면 null. 111행 deadline+30분이 지났으면 null. 그 외에는 stale을 붙여 반환. 단 deadline은 2번 결함의 영향을 받는다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "monitorDeadline이 max(1분, 주기) 대신 min을 사용",
+     "file": "src/monitor.ts",
+     "line": 95,
+     "evidence": "`Math.min(60_000, (m.everySec ?? 60) * 1000)`는 nextAt 뒤 여유를 최대 1분으로 제한한다. 목표는 max(1분, 주기)다. Math.max로 바꿔야 한다. 이 결함은 isStale과 monitorView의 stale 및 forget 시점에도 영향을 준다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "m7",
+  "round": 1,
+  "kind": "bug",
+  "fn": "monitorView",
+  "breaks": 4,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 12,
+  "costUsd": 0.0245,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "네 항목 중 세 항목은 충족하지만, monitorView의 `until` 비교가 거꾸로 되어 있어 항목 4를 만족하지 못한다.",
+   "criteria": [
+    {
+     "criterion": "1. onRun: lastRunAt=now, 주기가 있으면 nextAt=now+주기*1000",
+     "pass": true,
+     "evidence": "src/monitor.ts:89 — lastRunAt을 now로 두고, everySec가 있으면 now + everySec*1000, 없으면 prev.nextAt을 유지한다."
+    },
+    {
+     "criterion": "2. monitorDeadline: nextAt이 있으면 nextAt+max(1분,주기), 없으면 lastRun+2×주기, 주기도 없으면 6시간",
+     "pass": true,
+     "evidence": "src/monitor.ts:94-96 — nextAt이 있으면 nextAt + max(60000, 주기*1000)(주기 없으면 60초로 대체)을 쓰고, 없으면 lastRunAt + 2*주기 또는 6시간(UNTIMED_GRACE_MS)을 쓴다."
+    },
+    {
+     "criterion": "3. 주기 없는 monitor 감시는 마지막 신호 후 2시간까지 신호 있음",
+     "pass": true,
+     "evidence": "src/monitor.ts:102, 109 — kind가 monitor이고 everySec가 없으면 lastRunAt + MONITOR_GRACE_MS(2시간)를 deadline으로 쓴다."
+    },
+    {
+     "criterion": "4. monitorView: until이 지났으면 null, 신호 잃은 지 30분 넘으면 null, 그 밖에는 stale을 붙여 반환",
+     "pass": false,
+     "evidence": "src/monitor.ts:108 — `if (m.until && now < m.until) return null`. 조건이 반대다. until이 아직 지나지 않았을 때 null을 반환하고, until이 지난 뒤에는 null을 반환하지 않는다. `now >= m.until`(또는 `now > m.until`)이어야 한다. 30분 규칙(111행)과 stale 부착(113행)은 맞다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "monitorView의 until 비교 방향이 반대",
+     "file": "src/monitor.ts",
+     "line": 108,
+     "evidence": "`now < m.until`이면 null을 반환한다. 타임아웃 전에는 감시가 사라지고, 타임아웃이 지난 뒤에는 끝난 것으로 처리되지 않는다. `now >= m.until`로 고쳐야 한다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "ok1",
+  "round": 1,
+  "kind": "ok",
+  "fn": "syncColumns",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 10,
+  "costUsd": 0.0205,
+  "turns": 3,
+  "verdict": {
+   "verdict": "pass",
+   "summary": "`syncColumns` in src/sync.ts:22-37 meets all five criteria. I read the code only and did not run it.",
+   "criteria": [
+    {
+     "criterion": "1. Columns in prev keep their order and collapse state",
+     "pass": true,
+     "evidence": "Line 25-27 filters and maps `prev` in order. `{...c}` keeps the collapse field, and only `title` is overwritten."
+    },
+    {
+     "criterion": "2. If statuses is non-empty, titles follow Orca",
+     "pass": true,
+     "evidence": "Line 24 builds `names` only when `statuses?.length` is truthy. Line 27 sets `title: names?.get(c.id) ?? c.title`."
+    },
+    {
+     "criterion": "3. Columns missing from statuses are removed unless still in use",
+     "pass": true,
+     "evidence": "Line 26 keeps a column only if `!names || names.has(c.id) || used.includes(c.id)`."
+    },
+    {
+     "criterion": "4. Append missing columns: Orca list or the 4 defaults first, then inUse with the id as title, with no duplicates",
+     "pass": true,
+     "evidence": "Line 34 adds `statuses` if non-empty, otherwise `DEFAULT_STATUSES`. Line 35 then adds `inUse` ids with `title: id`. `add` skips ids already in the `have` set (line 30) and registers new ones (line 31)."
+    },
+    {
+     "criterion": "5. Without statuses (or if empty), nothing is removed and no title changes",
+     "pass": true,
+     "evidence": "`names` is null in that case, so the filter keeps every column and `title` falls back to `c.title`."
+    }
+   ],
+   "mustFix": []
+  }
+ },
+ {
+  "id": "ok1",
+  "round": 2,
+  "kind": "ok",
+  "fn": "syncColumns",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 10,
+  "costUsd": 0.0203,
+  "turns": 3,
+  "verdict": {
+   "verdict": "pass",
+   "summary": "`src/sync.ts`의 `syncColumns`는 목표의 다섯 항목을 모두 만족합니다. 코드를 읽어서만 확인했고, 실행이나 테스트는 하지 않았습니다.",
+   "criteria": [
+    {
+     "criterion": "1. prev의 컬럼은 순서와 접힘 상태를 유지한다",
+     "pass": true,
+     "evidence": "26~27행에서 `prev`를 filter한 뒤 map하며 `{...c, title}`로 펼치므로 순서와 다른 필드(접힘 포함)가 그대로 남는다."
+    },
+    {
+     "criterion": "2. statuses가 있으면 제목은 Orca의 이름을 따른다",
+     "pass": true,
+     "evidence": "24행에서 `names`를 만들고 27행에서 `names?.get(c.id) ?? c.title`로 제목을 덮어쓴다."
+    },
+    {
+     "criterion": "3. statuses에 없는 컬럼은 없애되, inUse에 있으면 남긴다",
+     "pass": true,
+     "evidence": "26행의 filter가 `!names || names.has(c.id) || used.includes(c.id)`이다."
+    },
+    {
+     "criterion": "4. 없는 상태를 덧붙인다: Orca 목록(없거나 비면 기본 4개), 그다음 inUse(제목은 id), 중복 없음",
+     "pass": true,
+     "evidence": "34행에서 statuses 또는 DEFAULT_STATUSES를 먼저 add하고, 35행에서 used를 `title: id`로 add한다. 29~33행의 `have` 집합이 같은 id의 중복 추가를 막는다."
+    },
+    {
+     "criterion": "5. statuses가 없거나 비면 컬럼을 없애지 않고 제목도 바꾸지 않는다",
+     "pass": true,
+     "evidence": "`statuses?.length`가 falsy면 `names`가 null이다. 그러면 26행은 모두 통과시키고 27행은 `c.title`을 그대로 쓴다."
+    }
+   ],
+   "mustFix": []
+  }
+ },
+ {
+  "id": "ok2",
+  "round": 1,
+  "kind": "ok",
+  "fn": "moveCard",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 12,
+  "costUsd": 0.0387,
+  "turns": 3,
+  "verdict": {
+   "verdict": "pass",
+   "summary": "`moveCard`는 목표의 네 가지 기준을 모두 만족합니다. 코드를 읽어서 확인했고, 실행은 하지 않았습니다.",
+   "criteria": [
+    {
+     "criterion": "1. column의 열린 카드들 사이 index에 삽입, 범위 밖은 0~(다른 열린 카드 수)로 보정, 맨 끝 가능",
+     "pass": true,
+     "evidence": "src/board.ts:163-167 — siblings는 해당 컬럼의 열린 카드 중 자기 자신을 뺀 목록이다. at = clamp(index, 0, siblings.length)이고 splice로 넣는다. at이 siblings.length이면 맨 끝에 들어간다."
+    },
+    {
+     "criterion": "2. 그 컬럼 열린 카드의 order를 0부터 차례로 재부여",
+     "pass": true,
+     "evidence": "src/board.ts:168 — siblings를 순회하며 order를 i로 매긴다. 이동한 카드는 column이 갱신된 채로 포함된다. 같은 컬럼 이동과 다른 컬럼에서의 이동 모두 같은 코드로 처리된다."
+    },
+    {
+     "criterion": "3. 닫힌 카드는 건드리지 않음",
+     "pass": true,
+     "evidence": "src/board.ts:164 — `!c.closed` 필터로 닫힌 카드는 siblings에서 빠진다. 그래서 order 재부여 대상이 아니고 `cards` 복사본에서도 그대로 남는다. 다만 이동 대상 `key` 자체가 닫힌 카드인 경우는 목표가 말하지 않아 따로 처리하지 않는다. 이 경우 그 카드가 열린 카드처럼 삽입된다."
+    },
+    {
+     "criterion": "4. 카드나 컬럼이 없으면 prev 그대로 반환",
+     "pass": true,
+     "evidence": "src/board.ts:160-161 — 카드가 없거나 `columns`에 해당 column id가 없으면 `return prev`로 같은 참조를 돌려준다."
+    }
+   ],
+   "mustFix": []
+  }
+ },
+ {
+  "id": "ok3",
+  "round": 1,
+  "kind": "ok",
+  "fn": "applyToolCall",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 10,
+  "costUsd": 0.0238,
+  "turns": 3,
+  "verdict": {
+   "verdict": "pass",
+   "summary": "`applyToolCall`이 목표의 다섯 항목을 모두 만족한다. 코드만 읽고 확인했고 실행은 하지 않았다.",
+   "criteria": [
+    {
+     "criterion": "ScheduleWakeup: stop이 true면 null, 아니면 loop 감시를 만들고 delaySeconds를 주기로, 다음 실행을 now+주기로 둔다",
+     "pass": true,
+     "evidence": "src/monitor.ts:50-59. `stop === true`면 null을 반환한다. 아니면 kind 'loop', everySec=delay, nextAt=now+delay*1000인 감시를 만든다."
+    },
+    {
+     "criterion": "CronCreate는 cron 감시를 만들고, CronDelete는 지금 감시가 cron일 때만 null, 아니면 undefined",
+     "pass": true,
+     "evidence": "src/monitor.ts:61-67. CronCreate는 kind 'cron' 감시를 반환한다. CronDelete는 `prev?.kind === 'cron' ? null : undefined`로 처리한다."
+    },
+    {
+     "criterion": "Monitor는 monitor 감시를 만든다. timeout_ms가 있고 persistent가 true가 아니면 until=now+timeout+1분, 그 밖에는 null",
+     "pass": true,
+     "evidence": "src/monitor.ts:68-79. `timeoutMs && input.persistent !== true ? now + timeoutMs + 60_000 : null`. timeout_ms가 없거나 양수가 아니면 num()이 null을 돌려줘서 until이 null이 된다."
+    },
+    {
+     "criterion": "TaskStop, KillShell, KillBash는 지금 감시가 monitor일 때만 null, 아니면 undefined",
+     "pass": true,
+     "evidence": "src/monitor.ts:13, 82-83. STOP_TOOLS 집합에 세 도구가 들어 있다. `prev?.kind === 'monitor'`일 때만 null을 반환하고, 그 외에는 undefined다."
+    },
+    {
+     "criterion": "그 밖의 도구는 undefined이고, since는 이전 감시의 값을 유지한다",
+     "pass": true,
+     "evidence": "src/monitor.ts:47, 81-83. `since = prev?.since ?? now`를 세 가지 생성 경로(loop, cron, monitor)가 모두 쓴다. default 분기는 undefined를 반환한다."
+    }
+   ],
+   "mustFix": []
+  }
+ },
+ {
+  "id": "ok4",
+  "round": 1,
+  "kind": "ok",
+  "fn": "markUnseen",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 9,
+  "costUsd": 0.0403,
+  "turns": 3,
+  "verdict": {
+   "verdict": "pass",
+   "summary": "`markUnseen`은 세 가지 기준을 모두 만족한다. 코드를 읽어 확인했고 실행은 하지 않았다.",
+   "criteria": [
+    {
+     "criterion": "주어진 카드들의 unseenAt을 at으로 한다. at이 null이면 표시를 지운다.",
+     "pass": true,
+     "evidence": "src/board.ts:213에서 `{ ...card, unseenAt: at }`로 설정한다. at이 null이고 표시가 있으면 current !== at이고 `at !== null` 조건에 걸리지 않으므로 null로 지워진다."
+    },
+    {
+     "criterion": "이미 표시가 있는 카드에 새 시각을 덮어쓰지 않는다.",
+     "pass": true,
+     "evidence": "src/board.ts:212의 `if (at !== null && current) continue`가 기존 표시가 있는 카드를 건너뛴다. 값이 0인 unseenAt은 falsy라 덮어써지지만, 실제로는 거의 나오지 않는 값이라 무시해도 된다."
+    },
+    {
+     "criterion": "바뀌는 것이 없으면 prev를 그대로 돌려준다. 없는 카드의 key는 무시한다.",
+     "pass": true,
+     "evidence": "src/board.ts:208에서 없는 카드는 continue로 건너뛴다. src/board.ts:210에서 값이 같으면 건너뛴다. src/board.ts:216에서 any가 false이면 `prev`를 그대로 반환한다."
+    }
+   ],
+   "mustFix": []
+  }
+ },
+ {
+  "id": "ok4",
+  "round": 2,
+  "kind": "ok",
+  "fn": "markUnseen",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 8,
+  "costUsd": 0.0338,
+  "turns": 3,
+  "verdict": {
+   "verdict": "pass",
+   "summary": "`markUnseen`는 세 가지 기준을 모두 만족한다. 코드를 직접 읽고 경우별로 따라가 확인했다. 실행이나 테스트는 하지 않았다.",
+   "criteria": [
+    {
+     "criterion": "주어진 카드들의 unseenAt을 at으로 하고, at이 null이면 표시를 지운다",
+     "pass": true,
+     "evidence": "src/board.ts:213에서 `unseenAt: at`으로 설정한다. at이 null이고 표시가 있는 카드는 209~212행을 통과해 null로 바뀐다."
+    },
+    {
+     "criterion": "이미 표시가 있는 카드에 새 시각을 덮어쓰지 않는다",
+     "pass": true,
+     "evidence": "src/board.ts:212의 `if (at !== null && current) continue`가 기존 표시가 있는 카드를 건너뛰므로 처음 시각이 남는다."
+    },
+    {
+     "criterion": "바뀌는 것이 없으면 prev를 그대로 돌려주고, 없는 카드의 key는 무시한다",
+     "pass": true,
+     "evidence": "src/board.ts:208에서 없는 카드는 continue로 넘어간다. 같은 값이면 210행에서 건너뛴다. 변경이 없으면 216행에서 `any`가 false라 `prev`를 그대로 반환한다."
+    }
+   ],
+   "mustFix": []
+  }
+ },
+ {
+  "id": "ok5",
+  "round": 1,
+  "kind": "ok",
+  "fn": "cronEverySec",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 13,
+  "costUsd": 0.027,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "기준 1과 2는 충족합니다. 기준 3은 필드가 5개를 넘는 식을 null로 돌려주지 않아 충족하지 못합니다.",
+   "criteria": [
+    {
+     "criterion": "1. `*/N * * * *`는 N*60초, `* * * * *`는 60초",
+     "pass": true,
+     "evidence": "monitor.ts:33-39에서 `*`는 1, `*/N`은 N으로 읽고 나머지 필드가 모두 `*`이면 minutes*60을 돌려줍니다. `*/0`은 null입니다."
+    },
+    {
+     "criterion": "2. `M */N * * *`는 N*3600초, `M * * * *`는 3600초",
+     "pass": true,
+     "evidence": "monitor.ts:40-43에서 분 필드가 숫자(`/^\\d+$/`)일 때 hour 필드를 every()로 읽고, 뒤의 3개 필드가 모두 `*`이면 hours*3600을 돌려줍니다. `M * * * *`는 hour `*`가 1로 읽혀 3600이 됩니다."
+    },
+    {
+     "criterion": "3. 나머지 필드가 `*`가 아니거나, 필드가 5개보다 적거나, 그 밖의 모양이면 null",
+     "pass": false,
+     "evidence": "monitor.ts:29는 `fields.length < 5`만 거릅니다. 그래서 6개 이상의 필드는 통과합니다. starsFrom이 `slice(from, 5)`로 5번째 필드까지만 보기 때문에 `*/5 * * * * *`는 300, `0 */2 * * * foo`는 7200을 돌려줍니다. 5개 필드가 아닌 모양은 null이어야 합니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "필드가 5개보다 많은 식을 null로 처리하지 않음",
+     "file": "src/monitor.ts",
+     "line": 29,
+     "evidence": "`if (fields.length < 5) return null`만 있고, starsFrom은 slice(from, 5)로 6번째 이후 필드를 무시합니다. `*/5 * * * * *`가 null이 아니라 300을 돌려줍니다. `!== 5`로 검사해야 합니다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "ok6",
+  "round": 1,
+  "kind": "ok",
+  "fn": "setColumns",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 11,
+  "costUsd": 0.0444,
+  "turns": 3,
+  "verdict": {
+   "verdict": "pass",
+   "summary": "`setColumns`(src/board.ts:172-192)는 목표의 다섯 기준을 모두 만족한다. 코드를 읽고 확인했고, 실행은 하지 않았다.",
+   "criteria": [
+    {
+     "criterion": "1. id와 제목의 앞뒤 공백 제거, 제목이 비면 id를 제목으로",
+     "pass": true,
+     "evidence": "176행 `String(c.id).trim()`, 179행 `String(c.title).trim() || id`."
+    },
+    {
+     "criterion": "2. id가 비었거나 중복인 컬럼 제외(첫 번째가 남음)",
+     "pass": true,
+     "evidence": "177행에서 `!id || seen.has(id)`이면 건너뛰고, 178행에서 처음 나온 id만 `seen`에 넣는다."
+    },
+    {
+     "criterion": "3. 남는 컬럼이 없으면 prev를 그대로 반환",
+     "pass": true,
+     "evidence": "183행 `if (clean.length === 0) return prev`."
+    },
+    {
+     "criterion": "4. 없어진 컬럼의 카드는 첫 컬럼 맨 끝으로, order 겹침 없음, 다른 카드는 그대로",
+     "pass": true,
+     "evidence": "187행에서 `nextOrder`로 첫 컬럼의 현재 최대 order+1(닫힌 카드 포함)을 구해 시작값으로 쓴다. 189행에서 남은 컬럼의 카드는 같은 객체 `c`를 그대로 두고, 없어진 컬럼의 카드만 `column: first, order: order++`로 옮긴다. 그래서 order가 겹치지 않는다."
+    },
+    {
+     "criterion": "5. collapsed는 true일 때만 남김",
+     "pass": true,
+     "evidence": "180행 `if (c.collapsed === true) col.collapsed = true`. 그 외에는 `collapsed` 키를 만들지 않는다."
+    }
+   ],
+   "mustFix": []
+  }
+ },
+ {
+  "id": "s1",
+  "round": 1,
+  "kind": "incomplete",
+  "fn": "syncColumns",
+  "breaks": 3,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 11,
+  "costUsd": 0.0288,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "기준 3이 구현되지 않았습니다. 나머지 기준은 충족합니다.",
+   "criteria": [
+    {
+     "criterion": "1. prev 컬럼의 순서·접힘 유지",
+     "pass": true,
+     "evidence": "sync.ts:25-27에서 prev를 순서대로 filter/map 하며 `...c`로 다른 필드를 보존합니다."
+    },
+    {
+     "criterion": "2. statuses가 있으면 제목은 Orca 이름",
+     "pass": true,
+     "evidence": "sync.ts:27 `title: names?.get(c.id) ?? c.title`"
+    },
+    {
+     "criterion": "3. statuses에 없는 컬럼은 제거, 단 inUse면 유지",
+     "pass": false,
+     "evidence": "sync.ts:26 `.filter((c) => !names || names.has(c.id))`은 inUse를 보지 않습니다. 그래서 Orca 목록에 없지만 워크스페이스가 아직 쓰는 컬럼도 지워졌다가, 35행에서 prev 위치가 아닌 맨 끝에 제목이 id인 채로 다시 붙습니다. 순서, 접힘, 제목이 모두 사라집니다."
+    },
+    {
+     "criterion": "4. 없는 상태를 Orca 목록(또는 기본 4개) → inUse 순으로 덧붙이고 중복 금지",
+     "pass": true,
+     "evidence": "sync.ts:28-35에서 have Set으로 중복을 막고, 목록이 없거나 비어 있으면 DEFAULT_STATUSES를 쓰고, 그다음 used를 추가합니다."
+    },
+    {
+     "criterion": "5. statuses가 없거나 비어 있으면 제거·제목 변경 없음",
+     "pass": true,
+     "evidence": "sync.ts:24 names가 null이 되어 26행은 전부 통과시키고 27행은 c.title을 유지합니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "statuses에 없지만 inUse인 컬럼이 제거됨 (기준 3 위반)",
+     "file": "src/sync.ts",
+     "line": 26,
+     "evidence": "filter가 `names.has(c.id)`만 검사하고 `used`에 포함된 id는 예외로 두지 않습니다. 예: prev=[{a,'A'(접힘)},{b}], statuses=[{b}], inUse=['a'] → a가 삭제된 뒤 끝에 {id:'a',title:'a'}로 다시 추가되어 원래 순서·접힘·제목을 잃습니다. 필터를 `names.has(c.id) || usedSet.has(c.id)`로 바꿔야 합니다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "s12",
+  "round": 1,
+  "kind": "bug",
+  "fn": "applyWorkspaceStatuses",
+  "breaks": 4,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 16,
+  "costUsd": 0.0293,
+  "turns": 4,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "기준 4가 충족되지 않습니다. 카드가 하나도 움직이지 않고 컬럼 제목만 바뀐 경우를 놓쳐 `prev`를 그대로 돌려줍니다. 나머지 기준은 코드로 확인했습니다.",
+   "criteria": [
+    {
+     "criterion": "1. 열린 카드는 상태 컬럼의 맨 끝에 놓고 order가 겹치지 않게 한다",
+     "pass": true,
+     "evidence": "src/sync.ts:70-77에서 컬럼별 다음 order를 기존 모든 카드의 최대 order+1로 계산하고, `place`가 이동할 때마다 이 값을 증가시킵니다. 열린 카드는 79-85행에서 `statusOf`의 컬럼으로 이동합니다."
+    },
+    {
+     "criterion": "2. 닫힌 카드는 워크스페이스 상태 때문에 옮기지 않는다",
+     "pass": true,
+     "evidence": "src/sync.ts:80에서 `card.closed`이면 status를 undefined로 두므로 상태에 따른 이동이 일어나지 않습니다."
+    },
+    {
+     "criterion": "3. 컬럼이 사라진 카드는 첫 번째 컬럼으로 보낸다",
+     "pass": true,
+     "evidence": "src/sync.ts:81에서 `ids.has(card.column)`이 거짓이면 `first`를 target으로 씁니다."
+    },
+    {
+     "criterion": "4. 바뀐 것이 없으면 prev를 그대로 돌려주고, 카드가 안 움직여도 컬럼(구성·제목)이 바뀌었으면 새 상태를 돌려준다",
+     "pass": false,
+     "evidence": "src/sync.ts:87-91의 `sameColumns`는 컬럼 개수와 id 순서만 비교하고 title은 비교하지 않습니다. `statuses`로 Orca의 제목이 바뀌어 `syncColumns`가 새 title을 만들어도(27행) 카드가 안 움직이면 91행에서 `prev`를 반환해 제목 변경이 반영되지 않습니다."
+    },
+    {
+     "criterion": "5. prev가 동기화 상태가 아니었으면 기존 컬럼은 버리고 새로 만든다",
+     "pass": true,
+     "evidence": "src/sync.ts:67에서 `prev.synced ? prev.columns : []`로 기존 컬럼을 버리고, 87행의 `prev.synced === true` 조건 때문에 비동기화 상태에서는 항상 새 상태를 돌려줍니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "컬럼 제목만 바뀐 경우 새 상태를 돌려주지 않음",
+     "file": "src/sync.ts",
+     "line": 87,
+     "evidence": "`sameColumns`가 `c.id === prev.columns[i].id`만 비교하고 `title`은 비교하지 않습니다. 카드가 안 움직이고 제목만 바뀌면 91행이 `prev`를 반환해 기준 4를 어깁니다. 비교 조건에 `c.title === prev.columns[i].title`을 추가해야 합니다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "s2",
+  "round": 1,
+  "kind": "bug",
+  "fn": "syncColumns",
+  "breaks": 2,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 12,
+  "costUsd": 0.0302,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "기준 2가 지켜지지 않았습니다. Orca 상태 목록이 있어도 기존 컬럼의 제목이 Orca 이름으로 바뀌지 않습니다. 나머지 기준은 충족합니다.",
+   "criteria": [
+    {
+     "criterion": "1. prev 컬럼의 순서와 접힘 유지",
+     "pass": true,
+     "evidence": "src/sync.ts:25-27에서 prev를 filter/map으로 그 순서대로 두고 `...c`로 다른 필드(접힘 등)를 그대로 복사합니다."
+    },
+    {
+     "criterion": "2. statuses가 있으면 제목은 Orca 이름을 따름",
+     "pass": false,
+     "evidence": "src/sync.ts:27 `title: c.title || (names?.get(c.id) ?? c.id)`는 prev 제목이 비어 있지 않으면 그대로 둡니다. 예를 들어 prev가 {id:'todo',title:'Old'}이고 statuses가 {id:'todo',title:'Todo'}이면 결과 제목은 'Old'가 됩니다. Orca 이름을 우선해야 합니다(`names?.get(c.id) ?? c.title`)."
+    },
+    {
+     "criterion": "3. 목록에 없는 컬럼은 제거하되 inUse면 유지",
+     "pass": true,
+     "evidence": "src/sync.ts:26 `!names || names.has(c.id) || used.includes(c.id)`가 이 조건을 구현합니다."
+    },
+    {
+     "criterion": "4. 없는 상태를 순서대로 덧붙임(Orca 목록 또는 기본 4개, 그다음 inUse), 중복 없음",
+     "pass": true,
+     "evidence": "src/sync.ts:28-35에서 have Set으로 중복을 막고, statuses가 비어 있으면 DEFAULT_STATUSES를 쓰며, 그다음 used를 id 제목으로 추가합니다."
+    },
+    {
+     "criterion": "5. statuses가 없거나 비면 제거·제목 변경 없음",
+     "pass": true,
+     "evidence": "names가 null이면 filter가 모두 통과시키고, 제목은 비어 있을 때만 id로 채웁니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "Orca 상태 목록이 있어도 기존 컬럼 제목이 Orca 이름으로 바뀌지 않음",
+     "file": "src/sync.ts",
+     "line": 27,
+     "evidence": "`title: c.title || (names?.get(c.id) ?? c.id)`는 prev에 제목이 있으면 Orca의 이름을 무시합니다. 목표 2는 statuses가 있을 때 제목이 Orca 이름을 따르라고 요구합니다. names에 id가 있으면 names.get(id)를 우선하고, 없을 때만 c.title을 쓰도록 고쳐야 합니다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "s2",
+  "round": 2,
+  "kind": "bug",
+  "fn": "syncColumns",
+  "breaks": 2,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 12,
+  "costUsd": 0.0234,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "기준 2가 충족되지 않았습니다. `statuses`가 있어도 `prev` 컬럼에 제목이 있으면 Orca 이름으로 바뀌지 않습니다. 나머지 기준은 코드로 확인했고 충족합니다.",
+   "criteria": [
+    {
+     "criterion": "1. prev 컬럼의 순서와 접힘 상태 유지",
+     "pass": true,
+     "evidence": "src/sync.ts:25-27에서 prev를 filter와 map({...c})로 처리하므로 순서와 나머지 필드(접힘 포함)가 그대로 남습니다."
+    },
+    {
+     "criterion": "2. statuses가 있으면 제목은 Orca의 이름을 따른다",
+     "pass": false,
+     "evidence": "src/sync.ts:27의 `title: c.title || (names?.get(c.id) ?? c.id)`는 기존 제목이 비어 있지 않으면 그대로 둡니다. 예를 들어 prev에 {id:'todo', title:'Old'}가 있고 statuses에 {id:'todo', title:'Todo'}가 있으면 결과는 'Old'입니다. 기대값은 'Todo'입니다."
+    },
+    {
+     "criterion": "3. statuses에 없는 컬럼은 제거하되 inUse인 것은 유지",
+     "pass": true,
+     "evidence": "src/sync.ts:26의 filter `!names || names.has(c.id) || used.includes(c.id)`가 이를 처리합니다."
+    },
+    {
+     "criterion": "4. 없는 상태를 덧붙임 (Orca 목록 또는 기본 4개, 그다음 inUse, 중복 없음)",
+     "pass": true,
+     "evidence": "src/sync.ts:28-35에서 have Set으로 중복을 막고, 먼저 statuses(없거나 비면 DEFAULT_STATUSES)를 덧붙인 뒤 used를 id 제목으로 덧붙입니다."
+    },
+    {
+     "criterion": "5. statuses가 없거나 비면 컬럼을 없애지 않고 제목도 바꾸지 않는다",
+     "pass": true,
+     "evidence": "names가 null이면 filter가 모두 통과하고, 제목은 비어 있을 때만 id로 채웁니다(src/sync.ts:24-27)."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "statuses가 있어도 Orca 제목으로 덮어쓰지 않음",
+     "file": "src/sync.ts",
+     "line": 27,
+     "evidence": "`c.title || (names?.get(c.id) ?? c.id)`는 prev의 제목이 있으면 Orca 이름을 무시합니다. 기준 2에 따라 names에 id가 있으면 `names.get(c.id)`를 우선 써야 합니다. names가 없을 때만 기존 제목을 유지해야 합니다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "s3",
+  "round": 1,
+  "kind": "bug",
+  "fn": "syncColumns",
+  "breaks": 4,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 13,
+  "costUsd": 0.0325,
+  "turns": 3,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "1·2·3·5번은 충족합니다. 4번은 `statuses`가 빈 배열 `[]`일 때 기본 4개가 덧붙여지지 않아 충족하지 못합니다.",
+   "criteria": [
+    {
+     "criterion": "1. prev 컬럼의 순서와 접힘 상태 유지",
+     "pass": true,
+     "evidence": "sync.ts:25-27에서 prev를 순서대로 filter/map하고 `{...c}`로 펼쳐 접힘 등 다른 필드를 보존합니다."
+    },
+    {
+     "criterion": "2. statuses가 비어 있지 않으면 제목은 Orca 이름",
+     "pass": true,
+     "evidence": "sync.ts:24에서 `statuses?.length`일 때만 names 맵을 만들고, 27행에서 `names?.get(c.id) ?? c.title`로 제목을 적용합니다."
+    },
+    {
+     "criterion": "3. statuses에 없는 컬럼은 제거하되 inUse면 유지",
+     "pass": true,
+     "evidence": "sync.ts:26의 filter가 `!names || names.has(c.id) || used.includes(c.id)`로 판단합니다."
+    },
+    {
+     "criterion": "4. 없는 상태를 덧붙이기: Orca 목록(없거나 비면 기본 4개), 그다음 inUse(제목은 id), 중복 금지",
+     "pass": false,
+     "evidence": "sync.ts:34의 `(statuses ?? DEFAULT_STATUSES)`는 null/undefined일 때만 기본값을 씁니다. 빈 배열 `[]`은 nullish가 아니어서 forEach가 아무것도 추가하지 않고, 기본 4개가 빠집니다. 목표는 '목록이 없거나 비어 있으면 기본 4개'라고 합니다. 중복 방지(`have` Set)와 inUse를 id 제목으로 덧붙이는 부분은 맞습니다."
+    },
+    {
+     "criterion": "5. statuses가 없거나 비면 컬럼을 없애지 않고 제목도 바꾸지 않음",
+     "pass": true,
+     "evidence": "names가 null이 되므로 26행은 필터링하지 않고 27행은 `c.title`을 그대로 둡니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "statuses가 빈 배열일 때 기본 4개 상태가 덧붙여지지 않음",
+     "file": "src/sync.ts",
+     "line": 34,
+     "evidence": "`(statuses ?? DEFAULT_STATUSES).forEach(add)`에서 `statuses`가 `[]`이면 `??`가 기본값으로 넘어가지 않아 아무 상태도 추가되지 않습니다. 예를 들어 `syncColumns([], [], [])`는 기본 4개 대신 빈 배열을 돌려줍니다. 24행처럼 `statuses?.length ? statuses : DEFAULT_STATUSES`로 판단해야 합니다. 이 빈 결과는 `applyWorkspaceStatuses`의 `columns[0]!`(69행)에서도 문제가 됩니다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "s8",
+  "round": 1,
+  "kind": "bug",
+  "fn": "applyWorkspaceStatuses",
+  "breaks": 4,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 12,
+  "costUsd": 0.0312,
+  "turns": 4,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "The `prev` return condition on line 91 is wrong. It breaks criteria 1, 4 and 5. Criteria 2 and 3 are met.",
+   "criteria": [
+    {
+     "criterion": "1. An open card goes to the end of its status column with no order clash",
+     "pass": false,
+     "evidence": "The placement logic is right: `place` uses `next`, which starts at max order+1 for each column. But line 91 `if (!cards || sameColumns) return prev` discards the moves whenever the columns are unchanged, which is the usual case for an already synced board. The card never moves."
+    },
+    {
+     "criterion": "2. A closed card is not moved because of workspace status",
+     "pass": true,
+     "evidence": "Line 80 sets `status` to undefined for a closed card, so it only moves if its own column is gone."
+    },
+    {
+     "criterion": "3. A card whose column is gone goes to the first column",
+     "pass": true,
+     "evidence": "Line 81 falls back to `first` when `card.column` is not in `ids`. The same line-91 bug can still drop this move when the columns are unchanged, but a card whose column is gone implies the columns did change."
+    },
+    {
+     "criterion": "4. Return `prev` when nothing changed; return new state when only the columns changed",
+     "pass": false,
+     "evidence": "Line 91 returns `prev` whenever `!cards`, even if the columns or titles changed with no card moving. That violates the explicit requirement. The condition should be `!cards && sameColumns`."
+    },
+    {
+     "criterion": "5. If `prev` was not synced, drop the old columns and rebuild from the statuses",
+     "pass": false,
+     "evidence": "Line 67 rebuilds the columns correctly. But if no card moves, `!cards` makes line 91 return `prev` unchanged, with the old columns and `synced` not set to true."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "Wrong early-return condition drops card moves and column changes",
+     "file": "src/sync.ts",
+     "line": 91,
+     "evidence": "`if (!cards || sameColumns) return prev` uses OR. (a) Cards moved and the columns are unchanged: `prev` is returned and the moves are lost. (b) No card moved but the columns or titles changed, or `prev` was not synced: `prev` is returned and the new columns are lost. It should be `if (!cards && sameColumns) return prev`. The `cards ?? prev.cards` on line 92 is also redundant."
+    }
+   ]
+  }
+ },
+ {
+  "id": "s9",
+  "round": 1,
+  "kind": "incomplete",
+  "fn": "applyWorkspaceStatuses",
+  "breaks": 5,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 13,
+  "costUsd": 0.0273,
+  "turns": 4,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "기준 5가 구현되지 않았습니다. 나머지 1~4는 충족합니다.",
+   "criteria": [
+    {
+     "criterion": "1. 열린 카드는 자기 상태의 컬럼 맨 끝으로 이동하고 order가 겹치지 않는다",
+     "pass": true,
+     "evidence": "sync.ts:70-85에서 컬럼별 next order를 prev 전체 카드의 max(order)+1로 잡고 이동할 때마다 증가시킨다."
+    },
+    {
+     "criterion": "2. 닫힌 카드는 워크스페이스 상태 때문에 옮기지 않는다",
+     "pass": true,
+     "evidence": "sync.ts:80에서 card.closed이면 status가 undefined가 되어 현재 컬럼이 유지된다."
+    },
+    {
+     "criterion": "3. 컬럼이 없어진 카드는 첫 컬럼으로 보낸다",
+     "pass": true,
+     "evidence": "sync.ts:81에서 ids에 card.column이 없으면 first를 target으로 쓴다."
+    },
+    {
+     "criterion": "4. 변화가 없으면 prev를 그대로 반환하고, 카드가 안 움직여도 컬럼이 바뀌면 새 상태를 반환한다",
+     "pass": true,
+     "evidence": "sync.ts:87-92에서 cards가 null이고 sameColumns(synced, 컬럼 id·title 동일)일 때만 prev를 반환한다. 그 외에는 새 상태를 반환한다."
+    },
+    {
+     "criterion": "5. prev가 동기화 상태가 아니었으면 기존 컬럼을 버리고 상태 목록으로 새로 만든다",
+     "pass": false,
+     "evidence": "sync.ts:67에서 prev.synced와 상관없이 syncColumns(prev.columns, …)를 호출한다. 그래서 동기화 전의 기존 컬럼(사용자 컬럼)이 그대로 남고 그 뒤에 상태 컬럼이 붙는다. 기존 컬럼에 있던 카드도 그 컬럼에 남을 수 있다. prev.synced가 false일 때 []로 시작하는 분기가 없다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "동기화되지 않은 prev의 기존 컬럼을 버리지 않음",
+     "file": "src/sync.ts",
+     "line": 67,
+     "evidence": "`syncColumns(prev.columns, statusOf.values(), statuses)`가 prev.synced를 확인하지 않고 prev.columns를 그대로 넘긴다. prev.synced가 아닐 때는 빈 목록으로 시작해 상태 목록(또는 DEFAULT_STATUSES)과 사용 중인 상태만으로 컬럼을 만들어야 한다."
+    }
+   ]
+  }
+ },
+ {
+  "id": "s9",
+  "round": 2,
+  "kind": "incomplete",
+  "fn": "applyWorkspaceStatuses",
+  "breaks": 5,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 15,
+  "costUsd": 0.0298,
+  "turns": 5,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "기준 5가 구현되지 않았습니다. 나머지 기준은 코드로 확인했고 충족합니다.",
+   "criteria": [
+    {
+     "criterion": "1. 열린 카드는 자기 상태 컬럼의 맨 끝으로, order 겹침 없이",
+     "pass": true,
+     "evidence": "sync.ts:70-85 — 컬럼별 next order를 prev 전체 카드의 최대 order+1로 시작하고 옮길 때마다 증가시킵니다. 겹치지 않습니다."
+    },
+    {
+     "criterion": "2. 닫힌 카드는 상태 때문에 옮기지 않음",
+     "pass": true,
+     "evidence": "sync.ts:80 — closed이면 status가 undefined라서 상태로는 이동하지 않습니다."
+    },
+    {
+     "criterion": "3. 컬럼이 없어지면 첫 컬럼으로",
+     "pass": true,
+     "evidence": "sync.ts:81 — ids에 card.column이 없으면 first로 보냅니다."
+    },
+    {
+     "criterion": "4. 변화 없으면 prev 반환, 컬럼만 바뀌어도 새 상태",
+     "pass": true,
+     "evidence": "sync.ts:87-92 — 카드가 안 움직이고 sameColumns이면 prev를 반환합니다. 컬럼 id나 title이 다르면 새 객체를 반환합니다."
+    },
+    {
+     "criterion": "5. prev가 동기화 상태가 아니면 기존 컬럼을 버리고 상태 목록으로 새로 만듦",
+     "pass": false,
+     "evidence": "sync.ts:67 — prev.synced와 관계없이 syncColumns(prev.columns, ...)를 호출해서 기존 컬럼의 순서와 제목, 그리고 statuses에 없는 컬럼 중 사용 중이 아닌 것도 그대로 이어받습니다. prev.synced가 false일 때 prev.columns를 []로 바꾸는 분기가 없습니다. synced는 sync.ts:88의 sameColumns 판정에서만 쓰입니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "동기화되지 않은 prev의 기존 컬럼을 버리지 않음",
+     "file": "src/sync.ts",
+     "line": 67,
+     "evidence": "syncColumns(prev.columns, statusOf.values(), statuses)를 prev.synced와 무관하게 호출합니다. 동기화 전 보드(synced가 false나 undefined)의 사용자 컬럼이 결과에 남습니다. 목표 5는 이 컬럼을 버리고 상태 목록으로 새로 만들라고 합니다. 예를 들면 prev.synced ? prev.columns : []를 넘겨야 합니다."
+    }
+   ]
+  }
+ }
+]

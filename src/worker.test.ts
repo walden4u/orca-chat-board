@@ -794,7 +794,7 @@ test("Orca's monitoring mode (working overall, main turn done) reaches the card"
   await worker.deactivate()
 })
 
-// ---------- the judge ----------
+// ---------- goal mode: the goal file, and the judge ----------
 
 const VERDICT = {
   verdict: 'must-fix',
@@ -803,17 +803,27 @@ const VERDICT = {
   mustFix: [{ title: 'returns early', evidence: 'src/a.ts:3 returns early', file: 'src/a.ts', line: 3 }]
 }
 const answered = (verdict: unknown = VERDICT) => JSON.stringify({ subtype: 'success', is_error: false, total_cost_usd: 0.04, structured_output: verdict })
+const GOAL = ['# 목표: 동작하게 만들기', '', '- [x] 1. 파일이 있다', '  확인: ls src/a.ts', '- [ ] 2. 동작해야 한다', '  확인: node src/a.ts'].join('\n')
 
 type Mounted = Awaited<ReturnType<typeof mountWorker>>
 
+/** A host with goal mode turned on (it is off by default). */
+const goalMode = (storage: Record<string, unknown> = {}) =>
+  mockHost({
+    settings: { goalMode: true },
+    storage: storage as never,
+    results: { 'agents.list': { agents: [] }, 'workspace.readContext': null }
+  })
+
 /**
- * Orca's CLI with two chats in one folder (tab1's agent says it is done), and fakes for the two
- * programs a review starts: git, and Claude Code as the judge (`answer` is what it prints).
+ * Orca's CLI with two chats in one folder (tab1's agent says it is done), and fakes for what a
+ * review touches: the folder's GOAL.md (`files.goal`, null: none), git, and Claude Code as the
+ * judge (`answer` is what it prints).
  */
 function fakeJudge(answer: () => string | Promise<string>, folderIsHere = true) {
   const orcaCalls: string[][] = []
   const toolCalls: { tool: string; args: string[]; cwd: string; input?: string }[] = []
-  const heads = ['abc1234def', 'fff9999000']
+  const files: { goal: string | null } = { goal: null }
   setOrcaRunner(async (args) => {
     orcaCalls.push(args)
     if (args[0] === 'terminal' && args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: [term(1), term(2)], visualLayouts: [] } })
@@ -832,19 +842,20 @@ function fakeJudge(answer: () => string | Promise<string>, folderIsHere = true) 
       assert.equal(args[0], '--no-optional-locks')
       const git = args.slice(1).join(' ')
       if (git === 'rev-parse --is-inside-work-tree') return ok('true\n')
-      if (git === 'rev-parse HEAD') return ok(`${heads.shift() ?? 'eee0000111'}\n`)
+      if (git.startsWith('log --diff-filter=A ')) return ok('abc1234def\n')
       if (git.startsWith('status ')) return ok(' M src/a.ts\n?? src/new.ts\n')
       if (git.startsWith('cat-file ')) return ok('')
       if (git.startsWith('diff --name-only ')) return ok('src/a.ts\n')
       if (git.startsWith('diff --no-color ')) return ok('@@ -1 +1 @@\n-old\n+new\n')
       return { stdout: '', stderr: `unexpected git ${git}`, code: 1 }
     },
-    () => folderIsHere
+    () => folderIsHere,
+    (path) => (/[\\/]GOAL\.md$/.test(path) && path.includes('toolbox') ? files.goal : null)
   )
-  return { orcaCalls, toolCalls }
+  return { orcaCalls, toolCalls, files }
 }
 
-/** The card once `ready` holds for it (a review and the goal's starting point arrive a moment later). */
+/** The card once `ready` holds for it (a review's result arrives a moment after it is asked for). */
 async function cardWhen(worker: Mounted, key: string, ready: (card: CardView) => boolean): Promise<CardView> {
   for (let i = 0; i < 400; i++) {
     const card = ((await worker.request('board.get', {})) as BoardView).cards.find((c) => c.key === key)
@@ -854,14 +865,32 @@ async function cardWhen(worker: Mounted, key: string, ready: (card: CardView) =>
   throw new Error(`card ${key} never got there`)
 }
 const reviewed = (worker: Mounted, key = 'tab1') => cardWhen(worker, key, (c) => !!c.judge && c.judge.state !== 'running')
+const cardOf = (v: unknown, key = 'tab1') => (v as BoardView).cards.find((c) => c.key === key)!
 
-test('a review reads the folder, keeps its verdict on the card and sends nothing to the chat', async () => {
-  const { orcaCalls, toolCalls } = fakeJudge(() => answered())
-  const worker = await mountWorker(main, { host: host() })
+test('with goal mode on, a card shows the checklist of its folder as the file stands', async () => {
+  const { files } = fakeJudge(() => answered())
+  const worker = await mountWorker(main, { host: goalMode() })
+  // No GOAL.md in the folder: nothing to show.
+  assert.equal(cardOf(await worker.request('board.get', { refresh: true })).goalFile, null)
+  files.goal = GOAL
+  const first = cardOf(await worker.request('board.get', { refresh: true })).goalFile!
+  assert.deepEqual([first.title, first.done, first.total], ['목표: 동작하게 만들기', 1, 2])
+  assert.deepEqual(first.items, [
+    { text: '1. 파일이 있다', done: true },
+    { text: '2. 동작해야 한다', done: false }
+  ])
+  // Both chats work in that folder, so both cards show it. The agent ticks an item: the next listing has it.
+  files.goal = GOAL.replace('- [ ] 2.', '- [x] 2.')
+  const next = (await worker.request('board.get', { refresh: true })) as BoardView
+  assert.deepEqual([cardOf(next).goalFile!.done, cardOf(next, 'tab2').goalFile!.done], [2, 2])
+  await worker.deactivate()
+})
+
+test('a review holds the work against GOAL.md, keeps its verdict on the card and sends nothing to the chat', async () => {
+  const { orcaCalls, toolCalls, files } = fakeJudge(() => answered())
+  files.goal = GOAL
+  const worker = await mountWorker(main, { host: goalMode() })
   await worker.request('board.get', { refresh: true })
-  await worker.request('card.update', { key: 'tab1', goal: ' 1. 동작해야 한다 ' })
-  const withGoal = await cardWhen(worker, 'tab1', (c) => c.goalBase !== undefined)
-  assert.deepEqual([withGoal.goal, withGoal.goalBase], ['1. 동작해야 한다', 'abc1234def'])
 
   assert.deepEqual(await worker.request('judge.run', { key: 'tab1' }), { ok: true, error: null })
   const judge = (await reviewed(worker)).judge!
@@ -877,46 +906,21 @@ test('a review reads the folder, keeps its verdict on the card and sends nothing
   const judged = toolCalls.find((c) => c.tool === 'claude')!
   assert.equal(judged.cwd, '/Users/me/toolbox')
   assert.ok(judged.args.includes('--restricted') && judged.args.includes('--no-session-persistence'))
-  for (const part of ['1. 동작해야 한다', 'make it work', 'All done.', '- src/a.ts', '- src/new.ts', '+new', 'Other chats work in this folder']) {
+  // The whole goal file, the last request, the agent's claim and what changed.
+  for (const part of ['- [ ] 2. 동작해야 한다', '확인: node src/a.ts', 'make it work', 'All done.', '- src/a.ts', '- src/new.ts', '+new', 'Other chats work in this folder']) {
     assert.ok(judged.input!.includes(part), part)
   }
-  // What changed is counted from where the folder was when the goal was written.
+  // What changed is counted from the commit that added GOAL.md.
   assert.ok(toolCalls.some((c) => c.tool === 'git' && c.args.join(' ') === '--no-optional-locks diff --no-color abc1234def'))
   // Nothing was typed into any terminal: only you send.
   assert.deepEqual(orcaCalls.filter((c) => c[0] === 'terminal' && c[1] !== 'list'), [])
   await worker.deactivate()
 })
 
-test('the goal remembers where its work started until it is cleared', async () => {
-  fakeJudge(() => answered())
-  const worker = await mountWorker(main, { host: host() })
-  await worker.request('board.get', { refresh: true })
-  await worker.request('card.update', { key: 'tab1', goal: 'ship it' })
-  assert.equal((await cardWhen(worker, 'tab1', (c) => c.goalBase !== undefined)).goalBase, 'abc1234def')
-  // Other words for the same work: the starting point stays.
-  await worker.request('card.update', { key: 'tab1', goal: 'ship it, with tests' })
-  await new Promise((done) => setTimeout(done, 30))
-  const reworded = await cardWhen(worker, 'tab1', (c) => c.goal === 'ship it, with tests')
-  assert.equal(reworded.goalBase, 'abc1234def')
-  // Sent to the chat from the board: remembered, until the goal says something else.
-  const cardOf = (v: unknown) => (v as BoardView).cards.find((c) => c.key === 'tab1')!
-  assert.equal(cardOf(await worker.request('card.update', { key: 'tab1', goalSent: true })).goalSent, true)
-  assert.equal(cardOf(await worker.request('card.update', { key: 'tab1', goal: 'ship it, with tests', note: 'n' })).goalSent, true)
-  assert.equal(cardOf(await worker.request('card.update', { key: 'tab1', goal: 'ship it, with tests and docs' })).goalSent, undefined)
-  // Cleared: the next goal starts from where the folder is then.
-  const cleared = cardOf(await worker.request('card.update', { key: 'tab1', goal: '  ' }))
-  assert.deepEqual([cleared.goal, cleared.goalBase], [undefined, undefined])
-  // No goal, nothing to have sent.
-  assert.equal(cardOf(await worker.request('card.update', { key: 'tab1', goalSent: true })).goalSent, undefined)
-  await worker.request('card.update', { key: 'tab1', goal: 'next thing' })
-  assert.equal((await cardWhen(worker, 'tab1', (c) => c.goalBase !== undefined)).goalBase, 'fff9999000')
-  await worker.deactivate()
-})
-
 test('one review at a time; a closed chat and a folder that is not here are refused', async () => {
   let finish: (printed: string) => void = () => undefined
   const { toolCalls } = fakeJudge(() => new Promise<string>((done) => (finish = done)))
-  const worker = await mountWorker(main, { host: host() })
+  const worker = await mountWorker(main, { host: goalMode() })
   await worker.request('board.get', { refresh: true })
   assert.deepEqual(await worker.request('judge.run', { key: 'nope' }), { ok: false, error: 'closed' })
   assert.deepEqual(await worker.request('judge.run', { key: 'tab1' }), { ok: true, error: null })
@@ -925,12 +929,14 @@ test('one review at a time; a closed chat and a folder that is not here are refu
   for (let i = 0; i < 400 && !toolCalls.some((c) => c.tool === 'claude'); i++) await new Promise((done) => setTimeout(done, 5))
   finish(answered({ ...VERDICT, verdict: 'pass', criteria: [{ criterion: '1. it works', pass: true, evidence: 'src/a.ts:3' }], mustFix: [] }))
   const judge = (await reviewed(worker)).judge!
-  // No goal on the card: judged against the last request, and it says so. Nothing to fix, nothing drafted.
+  // No GOAL.md in the folder: judged against the last request, and it says so. Nothing to fix, nothing drafted.
   assert.deepEqual([judge.verdict!.verdict, judge.draft, judge.notes], ['pass', null, ['no-goal', 'shared-folder']])
+  // Without a goal file there is no commit to count from: what is not committed yet is what changed.
+  assert.ok(toolCalls.some((c) => c.tool === 'git' && c.args.join(' ') === '--no-optional-locks diff --no-color HEAD'))
   await worker.deactivate()
 
   fakeJudge(() => answered(), false)
-  const away = await mountWorker(main, { host: host() })
+  const away = await mountWorker(main, { host: goalMode() })
   await away.request('board.get', { refresh: true })
   assert.deepEqual(await away.request('judge.run', { key: 'tab1' }), { ok: false, error: 'no-folder' })
   await away.deactivate()
@@ -938,73 +944,45 @@ test('one review at a time; a closed chat and a folder that is not here are refu
 
 test('a review that fails says why, and one cut off by a reload is not left running', async () => {
   fakeJudge(() => 'Error: not logged in')
-  const worker = await mountWorker(main, { host: host() })
+  const worker = await mountWorker(main, { host: goalMode() })
   await worker.request('board.get', { refresh: true })
   await worker.request('judge.run', { key: 'tab1' })
   const failed = (await reviewed(worker)).judge!
   assert.deepEqual([failed.state, failed.error], ['failed', 'the judge did not answer in JSON'])
-  // tab2 has no goal and Orca knows no request of its agent: nothing to judge against.
+  // tab2's folder has no GOAL.md and Orca knows no request of its agent: nothing to judge against.
   await worker.request('judge.run', { key: 'tab2' })
-  assert.deepEqual([(await reviewed(worker, 'tab2')).judge!.state, (await reviewed(worker, 'tab2')).judge!.error], ['failed', 'nothing'])
+  const nothing = (await reviewed(worker, 'tab2')).judge!
+  assert.deepEqual([nothing.state, nothing.error], ['failed', 'nothing'])
   await worker.deactivate()
 
   const stored = mergeChats(emptyBoard(), [term(1)], 1).state
   stored.cards.tab1 = { ...stored.cards.tab1!, judge: { state: 'running', at: 5 } }
   fakeJudge(() => answered())
-  const reloaded = await mountWorker(main, { host: host({ board: stored }) })
+  const reloaded = await mountWorker(main, { host: goalMode({ board: stored }) })
   const view = (await reloaded.request('board.get', { refresh: true })) as BoardView
-  assert.deepEqual(view.cards.find((c) => c.key === 'tab1')!.judge, { state: 'failed', at: 5, error: 'interrupted' })
+  assert.deepEqual(cardOf(view).judge, { state: 'failed', at: 5, error: 'interrupted' })
   await reloaded.deactivate()
 })
 
-test('with the setting on, a checked chat with a goal is reviewed when its turn ends well', async () => {
-  const { toolCalls } = fakeJudge(() => answered())
-  const reviews = () => toolCalls.filter((c) => c.tool === 'claude').length
-  const mount = async (judgeOnFinish: boolean) => {
-    const worker = await mountWorker(main, {
-      host: mockHost({ settings: { judgeOnFinish }, results: { 'agents.list': { agents: [] }, 'workspace.readContext': null } })
-    })
-    await worker.request('board.get', { refresh: true })
-    return worker
-  }
-  const turn = async (worker: Mounted, terminalId: string, at: number, outcome: 'success' | 'interruption' = 'success') => {
-    await worker.emit('agent.status.changed', { workspaceId: null, paneKey: terminalId, terminalId, state: 'working', receivedAt: at })
-    await worker.emit('agent.status.changed', {
-      workspaceId: null, paneKey: terminalId, terminalId, state: 'done', receivedAt: at + 5,
-      mainAgent: { state: 'done', outcome, stateStartedAt: at + 5 }
-    })
-    await new Promise((done) => setTimeout(done, 40))
-  }
-
-  const worker = await mount(true)
-  // Not checked, or no goal: nothing runs by itself.
-  await turn(worker, 'term_1', 10)
-  await worker.request('card.update', { key: 'tab1', watch: true })
-  await turn(worker, 'term_1', 20)
-  await worker.request('card.update', { key: 'tab2', goal: 'ship it' })
-  await turn(worker, 'term_2', 30)
-  assert.equal(reviews(), 0)
-  // Checked and with a goal, but the turn was interrupted: that one is yours.
-  await worker.request('card.update', { key: 'tab1', goal: 'ship it' })
-  await turn(worker, 'term_1', 40, 'interruption')
-  assert.equal(reviews(), 0)
-  // Checked, with a goal, and the turn ended well.
-  await turn(worker, 'term_1', 50)
-  assert.equal((await reviewed(worker)).judge!.verdict!.verdict, 'must-fix')
-  assert.equal(reviews(), 1)
+test('with goal mode off, no goal file is read and no judge runs', async () => {
+  const { toolCalls, files } = fakeJudge(() => answered())
+  files.goal = GOAL
+  // Off is the default.
+  const worker = await mountWorker(main, { host: host() })
+  const card = cardOf(await worker.request('board.get', { refresh: true }))
+  assert.equal(card.goalFile, null)
+  assert.deepEqual(await worker.request('judge.run', { key: 'tab1' }), { ok: false, error: 'off' })
+  await worker.emit('agent.status.changed', { workspaceId: null, paneKey: 'term_1', terminalId: 'term_1', state: 'working', receivedAt: 10 })
+  await worker.emit('agent.status.changed', { workspaceId: null, paneKey: 'term_1', terminalId: 'term_1', state: 'done', receivedAt: 15 })
+  await new Promise((done) => setTimeout(done, 40))
+  assert.deepEqual(toolCalls, [])
+  assert.equal(cardOf(await worker.request('board.get', {})).judge, undefined)
   await worker.deactivate()
-
-  // The setting off: the same turn starts no review.
-  const off = await mount(false)
-  await off.request('card.update', { key: 'tab1', watch: true, goal: 'ship it' })
-  await turn(off, 'term_1', 10)
-  assert.equal(reviews(), 1)
-  await off.deactivate()
 })
 
 test('how a drafted reply was used is counted once, and a draft never used counts as dropped', async () => {
   fakeJudge(() => answered())
-  const worker = await mountWorker(main, { host: host() })
+  const worker = await mountWorker(main, { host: goalMode() })
   await worker.request('board.get', { refresh: true })
   // No review yet: nothing to count.
   await worker.request('judge.tally', { key: 'tab1', how: 'asIs' })

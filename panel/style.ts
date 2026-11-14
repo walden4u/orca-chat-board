@@ -173,6 +173,9 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .logo.initial { align-items: center; justify-content: center; font-size: 10px; font-weight: 700;
   background: var(--orca-muted); color: var(--orca-muted-foreground); }
 .chip.ws { --c: #1fb5b5; }
+/* Goal mode: how far the checklist in the chat's folder is ticked. */
+.chip.goal { --c: #c79a2b; }
+.chip.goal.all { --c: #2fa36b; }
 .note { margin-top: 4px; color: var(--orca-muted-foreground); white-space: pre-wrap; word-break: break-word; }
 .card-actions { position: absolute; top: 3px; right: 3px; display: none; gap: 2px;
   background: var(--orca-background); border-radius: 4px; }
@@ -190,7 +193,6 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 
 .edit { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
 .edit-actions { display: flex; gap: 4px; justify-content: flex-end; }
-.edit-hint { font-size: 11px; line-height: 1.35; color: var(--orca-muted-foreground); }
 .primary { background: var(--orca-primary); color: var(--orca-primary-foreground);
   border: none; border-radius: 4px; padding: 2px 8px; }
 
@@ -229,7 +231,7 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
   border-top: 1px solid var(--orca-border); }
 .reply-hint { color: var(--orca-muted-foreground); }
 .reply-input { resize: vertical; min-height: 4.4em; max-height: 40vh; line-height: 1.45; }
-.reply-row { display: flex; align-items: center; gap: 8px; }
+.reply-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .reply-status { flex: 1; min-width: 0; color: var(--orca-destructive); word-break: break-word; }
 .reply-screen { border-top: 1px dashed var(--orca-border); padding-top: 8px; }
 .reply-screen pre { margin: 6px 0 0; padding: 8px; border-radius: 4px; overflow-x: auto; white-space: pre;

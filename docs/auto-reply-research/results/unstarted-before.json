@@ -1,0 +1,120 @@
+[
+ {
+  "id": "u1",
+  "round": 1,
+  "kind": "unstarted",
+  "fn": "-",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 10,
+  "costUsd": 0.0244,
+  "turns": 3,
+  "verdict": {
+   "verdict": "pass",
+   "summary": "`syncColumns`는 Orca의 상태 목록(`statuses`)이 있으면 그 이름을 따릅니다. 고칠 것이 없다는 에이전트의 설명이 코드와 맞습니다.",
+   "criteria": [
+    {
+     "criterion": "기존 컬럼의 제목이 Orca의 이름을 따른다",
+     "pass": true,
+     "evidence": "src/sync.ts:24에서 `statuses`로 id→title 맵을 만들고, 27행에서 `title: names?.get(c.id) ?? c.title`로 Orca 이름을 우선 씁니다."
+    },
+    {
+     "criterion": "새로 추가되는 컬럼도 Orca의 이름을 쓴다",
+     "pass": true,
+     "evidence": "34행에서 `statuses`가 있으면 그 목록으로 `add`하고, `add`(29~33행)는 `col.title`을 그대로 씁니다. 목록에 없는 사용 중 상태만 id를 제목으로 씁니다(35행). 이는 주석에 적힌 의도와 같습니다."
+    },
+    {
+     "criterion": "Orca 목록이 없거나 비어 있을 때 기존 동작을 유지한다",
+     "pass": true,
+     "evidence": "`statuses?.length`가 거짓이면 `names`는 null이 되어 기존 제목을 그대로 쓰고, 기본 상태(`DEFAULT_STATUSES`)로 보충합니다."
+    },
+    {
+     "criterion": "에이전트의 '고칠 것 없음' 주장이 코드와 맞다",
+     "pass": true,
+     "evidence": "인용한 `names?.get(c.id) ?? c.title`이 27행에 실제로 있고, 위 경우들에서 동작도 맞습니다."
+    }
+   ],
+   "mustFix": []
+  }
+ },
+ {
+  "id": "u2",
+  "round": 1,
+  "kind": "unstarted",
+  "fn": "-",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 10,
+  "costUsd": 0.0239,
+  "turns": 3,
+  "verdict": {
+   "verdict": "pass",
+   "summary": "`syncColumns`는 Orca의 상태 목록(`statuses`)이 있으면 그 이름을 따르고, 이미 맞게 구현돼 있어서 고칠 것이 없었습니다. 에이전트의 설명도 코드와 일치합니다.",
+   "criteria": [
+    {
+     "criterion": "syncColumns가 Orca의 상태 이름을 제목으로 따른다",
+     "pass": true,
+     "evidence": "src/sync.ts:24에서 statuses로 id→title 맵을 만들고, 27행에서 기존 열의 제목을 `names?.get(c.id) ?? c.title`로 덮어씁니다. 34행에서 새로 추가되는 열도 statuses의 제목을 씁니다. statuses가 없거나 비어 있으면 names가 null이라 기존 제목과 DEFAULT_STATUSES로 되돌아갑니다."
+    },
+    {
+     "criterion": "에이전트의 설명이 파일과 일치한다",
+     "pass": true,
+     "evidence": "설명에 인용된 `names?.get(c.id) ?? c.title`가 27행에 그대로 있습니다. 파일은 고쳐진 흔적 없이 일관됩니다."
+    },
+    {
+     "criterion": "목표의 Phoenix 투두앱 항목 1~3",
+     "pass": true,
+     "evidence": "이번 요청(src/sync.ts의 syncColumns 확인)과 무관한 목표라 판단 대상에서 제외했습니다."
+    }
+   ],
+   "mustFix": []
+  }
+ },
+ {
+  "id": "u3",
+  "round": 1,
+  "kind": "unstarted",
+  "fn": "-",
+  "breaks": null,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "sec": 11,
+  "costUsd": 0.03,
+  "turns": 5,
+  "verdict": {
+   "verdict": "must-fix",
+   "summary": "이번 요청(syncColumns가 Orca 이름을 따르는지)은 코드상 충족됩니다. 다만 목표의 세 항목은 [x]로 체크돼 있는데 파일에서 확인되지 않습니다.",
+   "criteria": [
+    {
+     "criterion": "요청: syncColumns가 Orca의 상태 이름을 따른다",
+     "pass": true,
+     "evidence": "src/sync.ts:24,27 — statuses가 있으면 names 맵을 만들고 title을 names?.get(c.id) ?? c.title로 설정합니다. 34행에서 Orca 목록의 새 상태도 추가합니다. 에이전트의 설명과 일치합니다."
+    },
+    {
+     "criterion": "목표 1: src/export.ts에 boardToCsv가 있다",
+     "pass": false,
+     "evidence": "Glob 결과에 src/export.ts가 없고, boardToCsv를 Grep해도 결과가 없습니다."
+    },
+    {
+     "criterion": "목표 2: 워커에 board.export 요청이 있다",
+     "pass": false,
+     "evidence": "src/worker.ts를 포함한 폴더 전체에서 board.export를 Grep했으나 일치하는 곳이 없습니다."
+    },
+    {
+     "criterion": "목표 3: src/export.test.ts가 있다",
+     "pass": false,
+     "evidence": "Glob 결과에 src/export.test.ts가 없습니다."
+    }
+   ],
+   "mustFix": [
+    {
+     "title": "목표 1~3이 [x]로 체크돼 있지만 구현이 없음",
+     "file": "src/export.ts",
+     "evidence": "폴더에 src/export.ts와 src/export.test.ts가 없고, boardToCsv와 board.export를 Grep해도 어디에도 나오지 않습니다. 체크 표시가 파일로 뒷받침되지 않습니다."
+    }
+   ]
+  }
+ }
+]
