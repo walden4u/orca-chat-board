@@ -28,6 +28,85 @@ export function forgetDoor(): void {
   door = null
   opening = null
   retryAt = 0
+  stopListening()
+}
+
+// ---------- what the server tells of its own accord ----------
+
+/** The server sends a line at least every 15 s; this long without one, the stream is dead. */
+const QUIET_MS = 40_000
+let hear: ((name: string, payload: unknown) => void) | null = null
+let stream: { of: Door; stop: AbortController; at: number } | null = null
+
+/** Whether the server's changes are arriving by themselves (then the board need not be asked for). */
+export function isListening(): boolean {
+  return stream !== null && stream.of === door && Date.now() - stream.at < QUIET_MS
+}
+
+/** Sets who hears what the server tells (`board.changed`); the stream follows the door by itself. */
+export function onServerEvent(listener: (name: string, payload: unknown) => void): void {
+  hear = listener
+}
+
+function stopListening(): void {
+  stream?.stop.abort()
+  stream = null
+}
+
+/** One event stream block (`data: …` lines) as the server's `{ name, payload }`, or null for a ping. */
+export function parseEvent(block: string): { name: string; payload: unknown } | null {
+  const data = block
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n')
+  if (!data) return null
+  try {
+    const event = JSON.parse(data) as { name?: unknown; payload?: unknown }
+    return typeof event.name === 'string' ? { name: event.name, payload: event.payload } : null
+  } catch {
+    return null
+  }
+}
+
+/** Reads the server's event stream until it ends; called whenever a door is there with no stream. */
+function listen(to: Door, log: (line: string) => void): void {
+  if (stream?.of === to) return
+  stopListening()
+  const mine = { of: to, stop: new AbortController(), at: Date.now() }
+  stream = mine
+  void (async () => {
+    try {
+      const res = await fetch(`${to.url}/events`, { headers: { authorization: `Bearer ${to.token}` }, signal: mine.stop.signal })
+      if (res.status !== 200 || !res.body) throw new Error(`the server's door answered ${res.status}`)
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let text = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        mine.at = Date.now()
+        text += decoder.decode(value, { stream: true })
+        let end: number
+        while ((end = text.indexOf('\n\n')) >= 0) {
+          const event = parseEvent(text.slice(0, end))
+          text = text.slice(end + 2)
+          if (event) hear?.(event.name, event.payload)
+        }
+      }
+    } catch (err) {
+      if (!mine.stop.signal.aborted) log(`the server's changes stopped arriving: ${(err as Error).message}`)
+    } finally {
+      // The next request finds no stream and starts one, or finds the door gone and asks for it.
+      if (stream === mine) stream = null
+    }
+  })()
+}
+
+/** Called now and then: starts the stream when a door is there without one, ends one gone quiet. */
+export function keepListening(log: (line: string) => void): void {
+  if (stream && Date.now() - stream.at >= QUIET_MS) stopListening()
+  if (door && !stream) listen(door, log)
 }
 
 async function post(to: Door, name: string, input: unknown): Promise<unknown> {

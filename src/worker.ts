@@ -4,7 +4,8 @@
 // reviews and settings are the server's own.
 import type { OrcaWorkerApi } from 'orca/worker'
 import { orcaEnvironment, setOrcaEnvironment, type RemoteTrouble } from './cli.ts'
-import { askServer, forgetDoor, isDirect } from './direct.ts'
+import { askServer, forgetDoor, isDirect, isListening, keepListening, onServerEvent } from './direct.ts'
+import { unseenHere, type SeenCard } from './unseen.ts'
 import { forgetWebTab, showChatInWebTab } from './webtab.ts'
 
 /** The Chat Board on the server: a development plugin, which is what `plugin dev request` can call. */
@@ -36,6 +37,8 @@ const REQUESTS = [
 const POLL_MS = 5000
 /** The same while the server answers directly (see direct.ts). */
 const DIRECT_POLL_MS = 1500
+/** The same while the server tells of its changes itself. */
+const LISTENING_POLL_MS = 10_000
 /** No panel request for this long: no panel is open, so nothing is asked. */
 const PANEL_IDLE_MS = 60_000
 
@@ -92,38 +95,10 @@ export default function activate(orca: OrcaWorkerApi): void {
     placeOf = Object.fromEntries(cards.map((c) => [c.key, { handle: c.handle ?? null, chatTab: !!c.sessionId, worktreeId: c.worktreeId ?? '' }]))
   }
 
-  /**
-   * Checked chats that finished and were not seen on this machine, by card key, with when. The
-   * server keeps one unseen mark a card, and its own panel (open on a screen nobody may be
-   * sitting at) opens the reply box first and clears it, so this panel would never hear of it.
-   * This machine keeps its own: set when a checked chat stops working or the server marks it,
-   * cleared when its box opens here, when it is answered from here or when it works again.
-   */
-  const unseenHere: Record<string, number> = {}
-  /** The mark each chat had when it was seen here. */
-  const seenHere: Record<string, number> = {}
-  const sawHere = (key: string): void => {
-    if (unseenHere[key]) seenHere[key] = unseenHere[key]
-    delete unseenHere[key]
-  }
-  let wasWorking: Record<string, boolean> | null = null
-  type SeenCard = { key: string; watch?: boolean; closed?: boolean; state?: string | null; mainState?: string | null; stateAt?: number; unseenAt?: number | null }
-  const adorn = (board: unknown): void => {
-    const cards = (board as { cards: SeenCard[] }).cards
-    const working: Record<string, boolean> = {}
-    for (const c of cards) {
-      // Orca's monitoring mode (working overall, the main agent's turn over) is a finished turn.
-      const busy = c.state === 'working' && (!c.mainState || c.mainState === 'working')
-      working[c.key] = busy
-      if (busy || c.closed || !c.watch) delete unseenHere[c.key]
-      // The server's own mark, unless it is the one just seen here (it clears it a moment later).
-      else if (c.unseenAt && c.unseenAt !== seenHere[c.key]) unseenHere[c.key] ??= c.unseenAt
-      else if (wasWorking?.[c.key] && c.state) unseenHere[c.key] = c.stateAt || Date.now()
-      if (unseenHere[c.key]) c.unseenAt = unseenHere[c.key]
-    }
-    for (const key of Object.keys(unseenHere)) if (!(key in working)) delete unseenHere[key]
-    wasWorking = working
-  }
+  /** This machine's own unseen marks (see unseen.ts): the server's panel clears the server's first. */
+  const marks = unseenHere()
+  const adorn = (board: unknown): void => marks.adorn((board as { cards: SeenCard[] }).cards, Date.now())
+  const sawHere = (key: string): void => marks.saw(key)
 
   /** Why a chat's tab is not showing, for the panel's message. */
   const WHY: Record<string, string> = {
@@ -209,24 +184,38 @@ export default function activate(orca: OrcaWorkerApi): void {
     orca.log(`panel: ${String(input?.message).slice(0, 200)}`)
   }) as never)
 
+  /** A board that came from the server by any way: the panel gets it when it differs from what it has. */
+  const take = (board: unknown): void => {
+    if (!isBoard(board)) return
+    adorn(board)
+    const text = JSON.stringify(board)
+    if (text === shown) return
+    shown = text
+    noteBoard(board)
+    orca.panels.post('board.changed' as never, board as never)
+  }
+  // The server tells of its changes itself while it answers directly.
+  onServerEvent((name, payload) => {
+    if (name !== 'board.changed') return
+    boardAt = Date.now()
+    take(payload)
+  })
+
   let polling = false
   setInterval(() => {
     const now = Date.now()
-    // Asked directly a request costs next to nothing, so the board is kept fresher.
-    if (polling || now - askedAt > PANEL_IDLE_MS || now - boardAt < (isDirect() ? DIRECT_POLL_MS : POLL_MS)) return
+    keepListening((line) => orca.log(line))
+    // Asked directly a request costs next to nothing, so the board is kept fresher; told of
+    // changes, it is only asked now and then, in case a change was not told.
+    const pace = isListening() ? LISTENING_POLL_MS : isDirect() ? DIRECT_POLL_MS : POLL_MS
+    if (polling || now - askedAt > PANEL_IDLE_MS || now - boardAt < pace) return
     polling = true
     void (async () => {
       try {
         await ready
         const board = await ask('board.get', {})
         boardAt = Date.now()
-        if (isBoard(board)) adorn(board)
-        const text = JSON.stringify(board)
-        if (isBoard(board) && text !== shown) {
-          shown = text
-          noteBoard(board)
-          orca.panels.post('board.changed' as never, board as never)
-        }
+        take(board)
       } catch (err) {
         orca.log(`board not read from the server: ${(err as Error).message.split('\n')[0]}`)
       } finally {

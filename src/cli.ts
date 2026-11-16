@@ -328,9 +328,12 @@ export async function evalInBrowserTab(page: string, expression: string): Promis
 
 /** Brings a browser tab to the foreground of this machine's Orca. */
 export async function showBrowserTab(page: string, worktreeId: string): Promise<void> {
-  // `tab switch --focus` alone leaves the window on another workspace: the tab's own comes first.
-  await runLocal(['worktree', 'activate', '--worktree', `id:${worktreeId}`])
-  await runLocal(['tab', 'switch', '--page', page, '--worktree', `id:${worktreeId}`, '--focus'])
+  // `tab switch --focus` alone leaves the window on another workspace, so the tab's own is shown
+  // too. Each is a command of its own (most of a second); they do not wait for one another.
+  await Promise.all([
+    runLocal(['worktree', 'activate', '--worktree', `id:${worktreeId}`]),
+    runLocal(['tab', 'switch', '--page', page, '--worktree', `id:${worktreeId}`, '--focus'])
+  ])
 }
 
 export async function listTerminals():Promise<{ terminals: LiveTerminal[]; layouts: unknown }> {
