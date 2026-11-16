@@ -649,15 +649,17 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   document.body.append(backdrop)
   if (!readOnly && !target.auto) setTimeout(() => input.focus(), 0)
   let engaged = false
-  const engage = () => {
+  const engage = (takeKeyboard = true) => {
     if (engaged) return
     engaged = true
     void handlers.onEngaged().then(() => {
-      if (open && !readOnly && !busy && document.activeElement !== input) input.focus()
+      if (takeKeyboard && open && !readOnly && !busy && document.activeElement !== input) input.focus()
     })
   }
-  if (target.auto) dialog.addEventListener('pointerdown', engage, true)
-  else engage()
+  // On this board a box that opened by itself shows its chat at once too (asked for on
+  // 2026-11-16): the chat that just finished is what you want to read. The keyboard is left
+  // where the chat's tab puts it; a click in the box takes it.
+  engage(!target.auto)
 
   const loadExchange = () =>
     void loadPreview(target.key, true).then(
