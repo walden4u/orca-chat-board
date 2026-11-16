@@ -3,8 +3,8 @@
 // (`orca plugin dev request … --environment <server>`), so the board, its columns, statuses,
 // reviews and settings are the server's own.
 import type { OrcaWorkerApi } from 'orca/worker'
-import { requestRemote, setOrcaEnvironment } from './cli.ts'
-import { showChatInWebTab } from './webtab.ts'
+import { orcaEnvironment, requestRemote, setOrcaEnvironment, type RemoteTrouble } from './cli.ts'
+import { forgetWebTab, showChatInWebTab } from './webtab.ts'
 
 /** The Chat Board on the server: a development plugin, which is what `plugin dev request` can call. */
 const TARGET = 'local.chat-board'
@@ -47,8 +47,29 @@ export default function activate(orca: OrcaWorkerApi): void {
   }
   let ready = applyServer()
   orca.settings.onDidChange(() => {
-    ready = applyServer()
+    const before = orcaEnvironment()
+    ready = applyServer().then(() => {
+      if (orcaEnvironment() !== before) forgetWebTab()
+    })
   })
+
+  /** What to tell the reader when the server did not answer at all. */
+  const TROUBLE: Record<Exclude<RemoteTrouble, null>, (server: string) => string> = {
+    unreachable: (s) => `서버 ${s}에 닿지 않습니다. 그 컴퓨터의 Orca가 켜져 있는지, Tailscale이 연결돼 있는지 확인하세요.`,
+    'no-server': (s) => `'${s}'(이)라는 이름으로 저장된 Orca 서버가 없습니다. 설정의 '원격 Orca 서버 이름'을 확인하세요.`,
+    'no-plugin': (s) => `서버 ${s}에 Chat Board가 개발 플러그인으로 로드돼 있지 않습니다.`
+  }
+
+  /** A request to the server's Chat Board; a server that does not answer is said in plain words. */
+  const ask = async (name: string, input: unknown): Promise<unknown> => {
+    try {
+      return await requestRemote(TARGET, name, input)
+    } catch (err) {
+      const trouble = (err as { trouble?: RemoteTrouble }).trouble
+      if (!trouble) throw err
+      throw new Error(TROUBLE[trouble](orcaEnvironment()))
+    }
+  }
 
   /** The board as the panel last got it, to tell a change from no change. */
   let shown = ''
@@ -81,7 +102,24 @@ export default function activate(orca: OrcaWorkerApi): void {
    * window, and `workspace.open` with the server's workspace id), so the server's web client in
    * a browser tab here is steered to it. Answers null when the chat's place is not known here.
    */
-  async function focusHere(key: string): Promise<{ ok: boolean; error: string | null } | null> {
+  type Shown = { ok: boolean; error: string | null }
+  /** The chat being shown, or just shown: the panel asks twice for one click (the card, then its reply box). */
+  let showing: { key: string; at: number; result: Promise<Shown | null> } | null = null
+  const SAME_CLICK_MS = 1500
+
+  function focusHere(key: string): Promise<Shown | null> {
+    if (showing && showing.key === key && Date.now() - showing.at < SAME_CLICK_MS) return showing.result
+    const mine = { key, at: Date.now(), result: showHere(key) }
+    showing = mine
+    // The time counts from when it was shown, and a failure is not kept.
+    void mine.result.then((r) => {
+      if (r?.ok) mine.at = Date.now()
+      else if (showing === mine) showing = null
+    })
+    return mine.result
+  }
+
+  async function showHere(key: string): Promise<Shown | null> {
     const place = placeOf[key]
     if (!place || !place.worktreeId) return null
     let answer: string
@@ -96,7 +134,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       return { ok: false, error: WHY[answer] ?? answer }
     }
     // What the server's worker does after showing a chat: it counts as seen.
-    void requestRemote(TARGET, 'card.seen', { key }).catch(() => undefined)
+    void ask('card.seen', { key }).catch(() => undefined)
     return { ok: true, error: null }
   }
 
@@ -108,7 +146,7 @@ export default function activate(orca: OrcaWorkerApi): void {
         const here = await focusHere(String((input as { key?: unknown } | null)?.key ?? ''))
         if (here) return here
       }
-      const result = await requestRemote(TARGET, name, input)
+      const result = await ask(name, input)
       // Most requests answer the whole board: the panel shows it, so it is what the next poll compares with.
       if (isBoard(result)) {
         shown = JSON.stringify(result)
@@ -131,7 +169,7 @@ export default function activate(orca: OrcaWorkerApi): void {
     void (async () => {
       try {
         await ready
-        const board = await requestRemote(TARGET, 'board.get', {})
+        const board = await ask('board.get', {})
         boardAt = Date.now()
         const text = JSON.stringify(board)
         if (isBoard(board) && text !== shown) {

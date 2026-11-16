@@ -90,18 +90,24 @@ async function webTab(url: string): Promise<string> {
  * server's web client; without it the saved server's address is used.
  */
 export async function showChatInWebTab(worktreeId: string, tabId: string, webUrl?: string): Promise<WebTabResult> {
-  const url = webUrl ?? webUrlOf(await serverEndpoint())
   const script = steerScript(worktreeId, tabId)
-  let answer: string
-  try {
-    if (!page) page = await webTab(url)
-    answer = await evalInBrowserTab(page, script)
-  } catch {
-    // The remembered tab was closed: look again once.
-    page = await webTab(url)
-    answer = await evalInBrowserTab(page, script)
+  // The tab is shown whatever the page answers: a page that asks for a pairing code has to be seen
+  // too. Steering it and bringing it forward are separate commands, run together.
+  const steer = async (tab: string, workspace: string): Promise<string> =>
+    (await Promise.all([evalInBrowserTab(tab, script), showBrowserTab(tab, workspace)]))[0]
+  if (page && home) {
+    try {
+      return (await steer(page, home)) as WebTabResult
+    } catch {
+      // The remembered tab was closed: it is looked for again below.
+    }
   }
-  // Shown whatever the page answered: a page that asks for a pairing code has to be seen too.
-  await showBrowserTab(page, home ?? (home = await localWorktreeId()))
-  return answer as WebTabResult
+  page = await webTab(webUrl ?? webUrlOf(await serverEndpoint()))
+  return (await steer(page, home!)) as WebTabResult
+}
+
+/** Forgets the browser tab: the server shown has changed. */
+export function forgetWebTab(): void {
+  page = null
+  home = null
 }

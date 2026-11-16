@@ -145,11 +145,12 @@ export function extraEnv(host: OrcaHost, env?: Record<string, string>): Record<s
 }
 
 /** The reason the CLI gives on stdout (`{"ok":false,"error":{"message":…}}`) when it fails. */
-function cliError(stdout: string): string {
+function cliError(stdout: string): { message: string; code: string } {
   try {
-    return (JSON.parse(stdout) as { error?: { message?: string } }).error?.message ?? ''
+    const error = (JSON.parse(stdout) as { error?: { message?: string; code?: string } }).error
+    return { message: error?.message ?? '', code: error?.code ?? '' }
   } catch {
-    return ''
+    return { message: '', code: '' }
   }
 }
 
@@ -169,10 +170,12 @@ function execOnce(inv: OrcaInvocation): Promise<string> {
       },
       (err, stdout, stderr) => {
         if (err) {
-          const detail = stderr || cliError(stdout)
-          const e = new Error(`${err.message}${detail ? `\n${detail}` : ''}`) as Error & { code?: unknown; detail?: string }
+          const said = cliError(stdout)
+          const detail = stderr || said.message
+          const e = new Error(`${err.message}${detail ? `\n${detail}` : ''}`) as Error & { code?: unknown; detail?: string; cliCode?: string }
           e.code = (err as { code?: unknown }).code
           e.detail = detail.trim()
+          e.cliCode = said.code
           reject(e)
         } else resolve(stdout)
       }
@@ -245,12 +248,30 @@ export async function requestRemote(pluginKey: string, name: string, input: unkn
     ])
   } catch (err) {
     // The command line (with the whole input in it) is no use to the reader: only the reason is.
-    const detail = (err as { detail?: string }).detail
-    throw new Error(detail || ((err as Error).message.split('\n').pop() ?? 'orca CLI failed'))
+    const { detail, cliCode } = err as { detail?: string; cliCode?: string }
+    throw remoteError(detail || ((err as Error).message.split('\n').pop() ?? 'orca CLI failed'), cliCode ?? '', !detail)
   }
-  const parsed = JSON.parse(out) as { ok?: boolean; result?: { result?: unknown }; error?: { message?: string } }
-  if (parsed.ok === false) throw new Error(parsed.error?.message ?? 'orca CLI failed')
+  const parsed = JSON.parse(out) as { ok?: boolean; result?: { result?: unknown }; error?: { message?: string; code?: string } }
+  if (parsed.ok === false) throw remoteError(parsed.error?.message ?? 'orca CLI failed', parsed.error?.code ?? '', false)
   return parsed.result?.result
+}
+
+/** Why the server did not answer at all, when that is the reason; null for an answer of the plugin's own. */
+export type RemoteTrouble = 'unreachable' | 'no-server' | 'no-plugin' | null
+
+/** `silent`: the CLI said nothing, which is what a command stopped at its time limit leaves. */
+function remoteError(message: string, code: string, silent: boolean): Error & { trouble: RemoteTrouble } {
+  const trouble: RemoteTrouble =
+    silent || code === 'remote_runtime_unavailable' ? 'unreachable'
+    : code === 'plugin_not_found' ? 'no-plugin'
+    : code === 'invalid_argument' && /--environment/.test(message) ? 'no-server'
+    : null
+  return Object.assign(new Error(message), { trouble })
+}
+
+/** The name of the server the board shows. */
+export function orcaEnvironment(): string {
+  return environment
 }
 
 async function runJson(args: string[]): Promise<unknown> {
