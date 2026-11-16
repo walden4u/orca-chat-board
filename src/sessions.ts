@@ -2,7 +2,8 @@
 // this looks at a file Orca owns: the database its agent hooks report to, read-only. Anything
 // unexpected (another Orca version, a locked file) means "unknown": chats are then opened again
 // with Claude's own list to pick from, as before.
-import { joinPath, type OrcaHost } from './cli.ts'
+import { existsSync, readdirSync } from 'node:fs'
+import { envGet, joinPath, type OrcaHost } from './cli.ts'
 import { userDataDir } from './profile.ts'
 
 /** A session id as Claude Code writes it: it is typed into a terminal, so only plain ones pass. */
@@ -37,6 +38,40 @@ export function setSessionsReader(next: SessionsReader | null): void {
 /** Tab id → Claude session id, for the tabs Orca's hooks have heard from. Throws when it cannot be read. */
 export function readClaudeSessions(): Promise<Record<string, string>> {
   return reader()
+}
+
+type SessionCheck = (id: string) => Promise<boolean | null>
+
+let checker: SessionCheck = hasTranscript
+
+/** Tests swap Claude's folder of conversations for a fake. */
+export function setSessionCheck(next: SessionCheck | null): void {
+  checker = next ?? hasTranscript
+}
+
+/**
+ * Whether Claude Code has that conversation on disk, so that `/resume <id>` can open it. A session
+ * nobody said anything in is never written: resuming it ends in "Session … was not found".
+ * `null` when Claude's folder cannot be read: unknown, the id is then trusted as before.
+ */
+export function sessionSaved(id: string): Promise<boolean | null> {
+  return checker(id)
+}
+
+async function hasTranscript(id: string): Promise<boolean | null> {
+  const host: OrcaHost = { platform: process.platform, env: process.env }
+  const home = envGet(host, host.platform === 'win32' ? 'USERPROFILE' : 'HOME')
+  if (!home || !SESSION_ID.test(id)) return null
+  const projects = joinPath(host, home, '.claude', 'projects')
+  let folders: string[]
+  try {
+    folders = readdirSync(projects)
+  } catch {
+    return null
+  }
+  // Claude names a project's folder after its path in its own way: every folder is looked into
+  // rather than that naming guessed.
+  return folders.some((name) => existsSync(joinPath(host, projects, name, `${id}.jsonl`)))
 }
 
 async function readHookDatabase(): Promise<Record<string, string>> {

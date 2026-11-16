@@ -49,6 +49,11 @@ let renamingColumn: string | null = null
 let confirmDeleteColumn: string | null = null
 let confirmClearArchive = false
 let confirmArchiveCard: string | null = null
+let confirmArchiveTimer: ReturnType<typeof setTimeout> | null = null
+/** How long "Close the tab?" waits for its second click. */
+const CONFIRM_ARCHIVE_MS = 5000
+/** A button is held down: a redraw now would take it away before the click lands. */
+let pressing = false
 let dragKey: string | null = null
 /** When the last drag ended; a click right after a drop is not an "open". */
 let dragEndedAt = 0
@@ -485,23 +490,30 @@ function renderCard(c: CardView): HTMLElement {
   }
   actions.append(edit)
   if (!c.closed) {
-    // Archiving closes the chat's tab in Orca, so it asks first: a second click within 3 seconds.
-    const confirming = confirmArchiveCard === c.key
+    // Archiving closes the chat's tab in Orca, so it asks first: a second click within 5 seconds.
     const ask = c.state === 'working' ? t.archiveConfirmWorking : c.agent === 'claude' && !c.sessionId ? t.archiveConfirm : t.archiveConfirmForGood
-    const away = el('button', { class: `ghost${confirming ? ' danger' : ''}`, title: t.archiveCard, 'aria-label': t.archiveCard }, confirming ? ask : '▾')
+    const asking = confirmArchiveCard === c.key
+    const away = el('button', { class: `ghost${asking ? ' danger' : ''}`, title: t.archiveCard, 'aria-label': t.archiveCard }, asking ? ask : '▾')
     away.onclick = async (e) => {
       e.stopPropagation()
-      if (!confirming) {
+      if (confirmArchiveCard !== c.key) {
+        const other = confirmArchiveCard !== null
         confirmArchiveCard = c.key
-        render(true)
-        setTimeout(() => {
-          if (confirmArchiveCard === c.key) {
-            confirmArchiveCard = null
-            render(true)
-          }
-        }, 3000)
+        // One timer for the question: an earlier one would take this question away too soon.
+        if (confirmArchiveTimer) clearTimeout(confirmArchiveTimer)
+        confirmArchiveTimer = setTimeout(() => {
+          confirmArchiveTimer = null
+          confirmArchiveCard = null
+          render()
+        }, CONFIRM_ARCHIVE_MS)
+        // The button under the pointer becomes the question itself; the board is not redrawn for it.
+        away.textContent = ask
+        away.classList.add('danger')
+        if (other) render()
         return
       }
+      if (confirmArchiveTimer) clearTimeout(confirmArchiveTimer)
+      confirmArchiveTimer = null
       confirmArchiveCard = null
       away.setAttribute('disabled', '')
       const r = await request<{ ok: boolean; error: string | null }>('chat.archive', { key: c.key })
@@ -532,6 +544,13 @@ function renderCard(c: CardView): HTMLElement {
       setView(await request<BoardView>('card.delete', { key: c.key }))
     }
     actions.append(del)
+  }
+  // A press on one of these buttons with the pointer slipping a little is still a click, not the
+  // start of dragging the card (which would swallow the click).
+  actions.draggable = true
+  actions.ondragstart = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
   }
   if (editingCard !== c.key) card.append(actions)
 
@@ -791,7 +810,7 @@ function renderColumn(col: Column, i: number, columns: Column[], cards: CardView
 }
 
 function render(force = false): void {
-  if (!force && isEditing() && !dragKey) {
+  if (!force && ((isEditing() && !dragKey) || pressing)) {
     pendingRender = true
     return
   }
@@ -918,6 +937,19 @@ function boot(): void {
   app.style.cssText = 'display:flex;flex-direction:column;height:100%;min-height:0'
   document.body.append(app)
   document.addEventListener('focusout', () => setTimeout(() => pendingRender && render(), 0))
+  // While a button of the board is held down, redraws wait: the click belongs to the button that
+  // was pressed, and a new one in its place would never get it.
+  document.addEventListener('pointerdown', (e) => {
+    pressing = !!(e.target as Element | null)?.closest?.('#app button')
+  })
+  const released = () => {
+    if (!pressing) return
+    pressing = false
+    setTimeout(() => pendingRender && render(), 0)
+  }
+  document.addEventListener('pointerup', released)
+  document.addEventListener('pointercancel', released)
+  document.addEventListener('dragend', released)
 
   orca.plugin.on('board.changed', (next) => setView(next as BoardView))
   orca.on('agent.status.changed', ({ terminalId, state, receivedAt, mainAgent }) => {

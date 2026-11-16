@@ -292,5 +292,5 @@ details.archive .archive-title { flex: 1; }
 .reopen { margin-left: auto; border-color: var(--orca-border); color: var(--orca-foreground); white-space: nowrap; }
 .card.closed .card-meta { flex-wrap: wrap; }
 details.archive .list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
-.danger { color: var(--orca-destructive); }
+.danger, .ghost.danger:hover { color: var(--orca-destructive); }
 `

@@ -297,13 +297,30 @@ export async function setWorkspaceStatus(worktreeId: string, status: string): Pr
   if (unknown) throw Object.assign(new Error(unknown.message ?? `Unknown workspace status ${status}`), { code: 'unknown_status' })
 }
 
-/** Types `text` into a terminal and presses Enter: in an agent's tab that submits it as your prompt. */
-export async function sendToTerminal(handle: string, text: string): Promise<void> {
+/** How long before a send Orca refused is asked for again. */
+const SEND_RETRY_MS = 1500
+
+/**
+ * Types `text` into a terminal and presses Enter: in an agent's tab that submits it as your prompt.
+ * With `retries`, a send Orca refuses while naming a request id (a terminal not ready to be written
+ * to) is asked for again under that id, as its message says to: Orca then never types it twice.
+ */
+export async function sendToTerminal(handle: string, text: string, retries = 0): Promise<void> {
   // `--text=<text>` in one argument: after a bare `--text`, a text that starts with `--` is read as an option.
-  const result = (await runJson(['terminal', 'send', '--terminal', handle, `--text=${text}`, '--enter'])) as {
-    send?: { accepted?: boolean }
-  } | null
-  if (result?.send?.accepted === false) throw new Error('Orca did not accept the input')
+  const args = ['terminal', 'send', '--terminal', handle, `--text=${text}`, '--enter']
+  let again: string[] = []
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = (await runJson([...args, ...again])) as { send?: { accepted?: boolean } } | null
+      if (result?.send?.accepted === false) throw new Error('Orca did not accept the input')
+      return
+    } catch (err) {
+      const id = /request ID: ([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})/i.exec((err as Error).message)?.[1]
+      if (!id || attempt >= retries) throw err
+      again = ['--retry-request', id, '--wait-submit', '1']
+      await new Promise((done) => setTimeout(done, SEND_RETRY_MS))
+    }
+  }
 }
 
 /**

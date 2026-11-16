@@ -56,7 +56,7 @@ import { changedFiles, changesNote, clipDiff, draftReply, isKorean, judgeArgs, j
 import { folderIsHere, readTextFile, runTool } from './tools.ts'
 import { GOAL_FILE, parseGoalFile } from './goal.ts'
 import { joinPath, orcaRuntimeId } from './cli.ts'
-import { readClaudeSessions } from './sessions.ts'
+import { readClaudeSessions, sessionSaved } from './sessions.ts'
 
 const BOARD_KEY = 'board'
 /** Which run of Orca the board last listed chats from. */
@@ -76,6 +76,8 @@ const ATTACH_SETTLE_MS = 600
 /** How long a reopened Claude gets to show its prompt before /resume is typed anyway. */
 const REOPEN_WAIT_MS = 12_000
 const REOPEN_POLL_MS = 1500
+/** Seen once: Orca refused that /resume with "terminal_not_writable". It is asked for a few times more. */
+const REOPEN_SEND_RETRIES = 5
 /** Terminal output this much newer than Orca's record of the chat: the record is behind. */
 const STALE_RECORD_MS = 120_000
 const MAX_SCREEN_CHARS = 20_000
@@ -280,12 +282,24 @@ export default function activate(orca: OrcaWorkerApi): void {
   }
   let sessionsAt = 0
   let sessionsError = ''
-  /** With the setting on: remembers which Claude session each open terminal chat is, now and then. */
+  /**
+   * Remembers which Claude session each open terminal chat is, now and then. Whatever the setting:
+   * a chat taken out of the archive by hand opens as itself too, and a chat closed before the
+   * setting was turned on can still be brought back.
+   */
   async function noteSessions(state: BoardState): Promise<BoardState> {
-    if (Date.now() - sessionsAt < SESSIONS_EVERY_MS || !(await restoreOn())) return state
+    if (Date.now() - sessionsAt < SESSIONS_EVERY_MS) return state
     sessionsAt = Date.now()
     try {
-      return setSessions(state, await readClaudeSessions())
+      const sessions = await readClaudeSessions()
+      // A session with nothing said in it yet is not on disk and cannot be resumed: the card keeps
+      // the conversation it had (a chat taken out of the archive, before one is picked) until then.
+      for (const [tab, id] of Object.entries(sessions)) {
+        const card = state.cards[tab]
+        if (!card || card.closed || card.resume === id) continue
+        if ((await sessionSaved(id)) === false) delete sessions[tab]
+      }
+      return setSessions(state, sessions)
     } catch (err) {
       const reason = (err as Error).message.split('\n')[0] ?? ''
       if (reason !== sessionsError) orca.log(`claude sessions not read: ${reason}`)
@@ -853,7 +867,9 @@ export default function activate(orca: OrcaWorkerApi): void {
         const rows = await readTerminalScreen(handle).catch(() => [])
         if (rows.some((row) => /^[❯›>]/.test(row))) break
       }
-      await sendToTerminal(handle, card.resume ? `/resume ${card.resume}` : '/resume')
+      // A noted session that Claude does not have (anymore): its list to pick from, as without one.
+      const known = !!card.resume && (await sessionSaved(card.resume)) !== false
+      await sendToTerminal(handle, known ? `/resume ${card.resume}` : '/resume', REOPEN_SEND_RETRIES)
       await resync()
     })().catch((err) => orca.log(`reopen failed: ${(err as Error).message.split('\n').pop()}`))
   }
@@ -875,6 +891,8 @@ export default function activate(orca: OrcaWorkerApi): void {
       const card = (await loadBoard()).cards[key]
       if (!card?.closed || !card.resume || card.sessionId || card.agent !== 'claude') continue
       if (opened >= MAX_RESTORED) break
+      // Nothing to come back to: a tab with Claude's list in it would only be in the way.
+      if ((await sessionSaved(card.resume)) === false) continue
       try {
         await reopenChat(key, false)
         opened++

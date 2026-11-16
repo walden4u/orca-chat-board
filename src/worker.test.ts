@@ -3,7 +3,7 @@ import { afterEach, assert, mockHost, mountWorker, test } from 'orca/testing'
 import * as main from './worker.ts'
 import { setOrcaRunner } from './cli.ts'
 import { setToolRunner } from './tools.ts'
-import { sessionsOf, setSessionsReader } from './sessions.ts'
+import { sessionsOf, setSessionCheck, setSessionsReader } from './sessions.ts'
 import { activeTabsByWorktree, cleanTitle, defaultColumns, emptyBoard, mergeChats, moveCard, setColumns, type LiveTerminal } from './board.ts'
 import type { BoardView, CardView } from './protocol.ts'
 import { looksBusy, suggestionOf } from './screen.ts'
@@ -50,10 +50,15 @@ const host = (storage: Record<string, unknown> = {}, focusedHandles: () => strin
     }
   })
 
+// The sessions of the tabs are read whatever the settings: never from this machine's own Orca.
+const noSessions = async () => ({})
+setSessionsReader(noSessions)
+
 afterEach(() => {
   setOrcaRunner(null)
   setToolRunner(null)
-  setSessionsReader(null)
+  setSessionsReader(noSessions)
+  setSessionCheck(null)
 })
 
 test('new agent chats land in the first column; plain shells are skipped', async () => {
@@ -681,6 +686,74 @@ test('an archived Claude chat opens again in a tab Orca starts, and its card mov
   await worker.deactivate()
 })
 
+test('with "open last chats again" off, a chat taken out of the archive still opens as its own conversation', async () => {
+  const ID = '11111111-2222-3333-4444-555555555555'
+  const calls: string[][] = []
+  let live = [term(1)]
+  setOrcaRunner(async (args) => {
+    calls.push(args)
+    if (args[0] === 'terminal' && args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: live, visualLayouts: [] } })
+    if (args[0] === 'agent' && args[1] === 'launch') {
+      live = [term(9, { title: 'Claude Code' })]
+      return JSON.stringify({ ok: true, result: { outcome: { kind: 'terminal', handle: 'term_9' } } })
+    }
+    if (args[1] === 'read') return JSON.stringify({ ok: true, result: { terminal: { tail: ['❯ Try "fix it"'] } } })
+    if (args[1] === 'send') return JSON.stringify({ ok: true, result: { send: { accepted: true } } })
+    if (args[1] === 'ps') return JSON.stringify({ ok: true, result: { worktrees: [] } })
+    throw new Error(`unexpected ${args.join(' ')}`)
+  })
+  setSessionsReader(async () => ({ tab1: ID }))
+  setSessionCheck(async () => true)
+  const worker = await mountWorker(main, { host: host() })
+  await worker.request('board.get', { refresh: true })
+  live = []
+  await worker.request('board.get', { refresh: true })
+  assert.deepEqual(await worker.request('chat.reopen', { key: 'tab1' }), { ok: true, error: null })
+  await new Promise((done) => setTimeout(done, 2000))
+  assert.deepEqual(calls.find((c) => c[1] === 'send'), ['terminal', 'send', '--terminal', 'term_9', `--text=/resume ${ID}`, '--enter', '--json'])
+  await worker.deactivate()
+})
+
+test('a /resume Orca refuses for a terminal not ready is asked for again under its request id', async () => {
+  const ID = '183d1865-7520-4e96-b5e0-529a30ba1276'
+  const calls: string[][] = []
+  let live = [term(1)]
+  let refused = 0
+  setOrcaRunner(async (args) => {
+    calls.push(args)
+    if (args[0] === 'terminal' && args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: live, visualLayouts: [] } })
+    if (args[0] === 'agent' && args[1] === 'launch') {
+      live = [term(9, { title: 'Claude Code' })]
+      return JSON.stringify({ ok: true, result: { outcome: { kind: 'terminal', handle: 'term_9' } } })
+    }
+    if (args[1] === 'read') return JSON.stringify({ ok: true, result: { terminal: { tail: ['❯ Try "fix it"'] } } })
+    if (args[1] === 'send') {
+      if (refused++ < 1) {
+        const message = `terminal_not_writable Terminal prompt request ID: ${ID}. Re-issue the exact command with --retry-request ${ID} --wait-submit <seconds>; do not retry it without that ID.`
+        return JSON.stringify({ ok: false, error: { message } })
+      }
+      return JSON.stringify({ ok: true, result: { send: { accepted: true } } })
+    }
+    if (args[1] === 'ps') return JSON.stringify({ ok: true, result: { worktrees: [] } })
+    throw new Error(`unexpected ${args.join(' ')}`)
+  })
+  const worker = await mountWorker(main, { host: host() })
+  await worker.request('board.get', { refresh: true })
+  live = []
+  await worker.request('board.get', { refresh: true })
+  assert.deepEqual(await worker.request('chat.reopen', { key: 'tab1' }), { ok: true, error: null })
+  await new Promise((done) => setTimeout(done, 3600))
+  const send = ['terminal', 'send', '--terminal', 'term_9', '--text=/resume', '--enter']
+  assert.deepEqual(
+    calls.filter((c) => c[1] === 'send'),
+    [
+      [...send, '--json'],
+      [...send, '--retry-request', ID, '--wait-submit', '1', '--json']
+    ]
+  )
+  await worker.deactivate()
+})
+
 test('a turn whose end shows up in a listing before its event is still news', async () => {
   // Two chats finish close together: the first one's event lists the agents, and that listing
   // already says the second one is done. Its own event then brings nothing new.
@@ -1072,6 +1145,7 @@ test('with the setting on, the Claude chats open when Orca quit are opened again
   })
   // Orca knows the session of tab1 only; tab3 is closed by hand before Orca quits.
   setSessionsReader(async () => ({ tab1: ID1 }))
+  setSessionCheck(async () => true)
   // One host for the three runs of the worker: what the board stored stays.
   const shared = mockHost({ settings: { restoreChats: true }, results: { 'agents.list': { agents: [] }, 'workspace.readContext': null } })
   const on = () => shared
@@ -1106,5 +1180,60 @@ test('with the setting on, the Claude chats open when Orca quit are opened again
   assert.deepEqual(calls.find((c) => c[1] === 'send'), ['terminal', 'send', '--terminal', 'term_11', `--text=/resume ${ID1}`, '--enter', '--json'])
   const open = ((await second.request('board.get', {})) as BoardView).cards.filter((c) => !c.closed)
   assert.deepEqual(open.map((c) => [c.key, c.note, c.handle]), [['tab11', 'keep me', 'term_11']])
+  await second.deactivate()
+})
+
+test('a session Claude has not saved is neither noted nor resumed by its number', async () => {
+  const ID1 = '11111111-2222-3333-4444-555555555555'
+  const EMPTY = '99999999-2222-3333-4444-555555555555'
+  const calls: string[][] = []
+  let live = [term(1)]
+  let launched = 0
+  setOrcaRunner(async (args) => {
+    calls.push(args)
+    const answer = (result: unknown) => JSON.stringify({ ok: true, result, _meta: { runtimeId: 'run-a' } })
+    if (args[0] === 'terminal' && args[1] === 'list') return answer({ terminals: live, visualLayouts: [] })
+    if (args[0] === 'agent' && args[1] === 'launch') {
+      launched++
+      live = [...live, term(10 + launched, { title: 'Claude Code' })]
+      return answer({ outcome: { kind: 'terminal', handle: `term_${10 + launched}` } })
+    }
+    if (args[1] === 'read') return answer({ terminal: { tail: ['Claude Code', '❯ Try "fix it"'] } })
+    if (args[1] === 'send') return answer({ send: { accepted: true } })
+    if (args[1] === 'ps') return answer({ worktrees: [] })
+    throw new Error(`unexpected ${args.join(' ')}`)
+  })
+  let sessions: Record<string, string> = { tab1: ID1 }
+  const saved = new Set([ID1])
+  setSessionsReader(async () => sessions)
+  setSessionCheck(async (id) => saved.has(id))
+  const shared = mockHost({ settings: { restoreChats: true }, results: { 'agents.list': { agents: [] }, 'workspace.readContext': null } })
+  const sent = () => calls.filter((c) => c[1] === 'send').map((c) => [c[3], c[4]])
+  /** The chat's tab is closed, and its card taken out of the archive again. */
+  const closeAndReopen = async (worker: Awaited<ReturnType<typeof mountWorker>>, key: string) => {
+    live = []
+    await worker.request('board.get', { refresh: true })
+    assert.deepEqual(await worker.request('chat.reopen', { key }), { ok: true, error: null })
+    await new Promise((done) => setTimeout(done, 2000))
+  }
+
+  const first = await mountWorker(main, { host: shared })
+  await first.request('board.get', { refresh: true })
+  await closeAndReopen(first, 'tab1')
+  assert.deepEqual(sent(), [['term_11', `--text=/resume ${ID1}`]])
+  await first.deactivate()
+
+  // The new tab's own session, with nothing said in it: Claude has not written it. The card keeps
+  // the conversation it had, and that one is opened the next time.
+  sessions = { tab11: EMPTY }
+  const second = await mountWorker(main, { host: shared })
+  await second.request('board.get', { refresh: true })
+  await closeAndReopen(second, 'tab11')
+  assert.deepEqual(sent().at(-1), ['term_12', `--text=/resume ${ID1}`])
+
+  // The noted conversation is gone from Claude's folder: its list to pick from.
+  saved.clear()
+  await closeAndReopen(second, 'tab12')
+  assert.deepEqual(sent().at(-1), ['term_13', '--text=/resume'])
   await second.deactivate()
 })
