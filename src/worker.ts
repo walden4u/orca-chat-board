@@ -5,6 +5,7 @@ import type { AgentState, BoardState, BoardView, CardView, Column, GoalFile, Jud
 import {
   activeTabsByWorktree,
   adoptCard,
+  setSessions,
   chatsOf,
   chatTabsOf,
   tabTitlesOf,
@@ -44,15 +45,26 @@ import {
 } from './cli.ts'
 import { applyToolCall, monitorView, onRun, type StoredMonitor } from './monitor.ts'
 import { dropAttachment, putAttachment, saveAttachment } from './attach.ts'
+import { newToken, openDoor, type RemoteDoor, type RemoteHandler } from './remote.ts'
+
+/** Storage key of the token a board on another machine must send; there once that board asked. */
+const REMOTE_TOKEN_KEY = 'remoteToken'
 import { readWorkspaceStatusNames } from './profile.ts'
 import { looksBusy, suggestionOf } from './screen.ts'
 import { applyWorkspaceStatuses, editSyncedColumns, moveWorkspaceCards } from './sync.ts'
 import { changedFiles, changesNote, clipDiff, draftReply, isKorean, judgeArgs, judgePrompt, readJudgeOutput, tailOf } from './judge.ts'
 import { folderIsHere, readTextFile, runTool } from './tools.ts'
 import { GOAL_FILE, parseGoalFile } from './goal.ts'
-import { joinPath } from './cli.ts'
+import { joinPath, orcaRuntimeId } from './cli.ts'
+import { readClaudeSessions } from './sessions.ts'
 
 const BOARD_KEY = 'board'
+/** Which run of Orca the board last listed chats from. */
+const RUNTIME_KEY = 'orcaRun'
+/** How often the Claude sessions of the open chats are read from Orca's hook database. */
+const SESSIONS_EVERY_MS = 20_000
+/** No more chats than this are opened again after Orca starts. */
+const MAX_RESTORED = 12
 const STATUS_KEY = 'status'
 const MONITORS_KEY = 'monitors'
 /** While synced, light refreshes re-read the workspace statuses at most this often. */
@@ -120,6 +132,35 @@ export default function activate(orca: OrcaWorkerApi): void {
   /** Orca's statuses with their names, from its profile; null while they cannot be read. */
   let statusNames: Column[] | null = null
   let statusNamesError = ''
+
+  /** Every panel handler by name: the door for a board on another machine answers with the same ones. */
+  const handlers = new Map<string, RemoteHandler>()
+  const handle = ((name: string, fn: RemoteHandler) => {
+    handlers.set(name, fn)
+    return (orca.panels.handle as unknown as (name: string, fn: RemoteHandler) => unknown)(name, fn)
+  }) as unknown as typeof orca.panels.handle
+  /** The door, once it was asked for (now, or before this worker was loaded again). */
+  let door: Promise<RemoteDoor> | null = null
+  const openRemote = (): Promise<RemoteDoor> =>
+    (door ??= (async () => {
+      let token = await orca.storage.get(REMOTE_TOKEN_KEY)
+      if (typeof token !== 'string' || !token) await orca.storage.set(REMOTE_TOKEN_KEY, (token = newToken()))
+      const opened = await openDoor(handlers, token as string)
+      orca.log(`answering a board on another machine at ${opened.address}:${opened.port}`)
+      return opened
+    })().catch((err) => {
+      door = null
+      throw err
+    }))
+  handle('remote.open', async () => {
+    try {
+      return await openRemote()
+    } catch (err) {
+      return { error: (err as Error).message }
+    }
+  })
+  // Asked for before: the door opens again with the worker, so that board goes on without asking.
+  void orca.storage.get(REMOTE_TOKEN_KEY).then((token) => (token ? openRemote() : null)).catch(() => undefined)
 
   // Every read-modify-write of storage goes through this queue.
   let queue: Promise<unknown> = Promise.resolve()
@@ -194,6 +235,32 @@ export default function activate(orca: OrcaWorkerApi): void {
       return new Set()
     }
   }
+
+  /** "Open last chats again" (a setting, off by default). */
+  const restoreOn = async (): Promise<boolean> => {
+    try {
+      return (await orca.settings.get('restoreChats')) === true
+    } catch {
+      return false
+    }
+  }
+  let sessionsAt = 0
+  let sessionsError = ''
+  /** With the setting on: remembers which Claude session each open terminal chat is, now and then. */
+  async function noteSessions(state: BoardState): Promise<BoardState> {
+    if (Date.now() - sessionsAt < SESSIONS_EVERY_MS || !(await restoreOn())) return state
+    sessionsAt = Date.now()
+    try {
+      return setSessions(state, await readClaudeSessions())
+    } catch (err) {
+      const reason = (err as Error).message.split('\n')[0] ?? ''
+      if (reason !== sessionsError) orca.log(`claude sessions not read: ${reason}`)
+      sessionsError = reason
+      return state
+    }
+  }
+  /** The first listing of chats since this worker started is still to come. */
+  let firstListing = true
 
   const autoMoveOn = async (): Promise<boolean> => {
     try {
@@ -332,6 +399,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   async function refresh(withAgents = true): Promise<BoardState> {
     let state = await loadBoard()
     try {
+      const wasOpen = Object.values(state.cards).filter((c) => !c.closed).map((c) => c.key)
       const { terminals, layouts } = await listTerminals()
       const titles = tabTitlesOf(layouts)
       const withTabTitles = terminals.map((t) => ({ ...t, tabTitle: titles.get(t.tabId) ?? null }))
@@ -360,9 +428,17 @@ export default function activate(orca: OrcaWorkerApi): void {
       if (ps) state = await applyPs(state, ps)
       state = await inferStatus(state, terminals)
       state = await applySync(state, withAgents)
+      state = await noteSessions(state)
       lastError = null
       refreshedAt = Date.now()
       await orca.storage.set(BOARD_KEY, state)
+      if (firstListing) {
+        firstListing = false
+        // The chats this listing found gone were open when the worker last looked: if Orca was
+        // started again since, they are the ones it closed by quitting.
+        const gone = wasOpen.filter((k) => state.cards[k]?.closed)
+        setTimeout(() => void restoreAfterRestart(gone).catch((err) => orca.log(`restore failed: ${(err as Error).message.split('\n')[0]}`)), 0)
+      }
       // Forget status of terminals that no longer exist.
       const live = new Set(Object.values(handles))
       const status = await loadStatus()
@@ -397,7 +473,7 @@ export default function activate(orca: OrcaWorkerApi): void {
     })
   }
 
-  orca.panels.handle('board.get', (input) =>
+  handle('board.get', (input) =>
     serial(async () => {
       if (input?.locale) locale = input.locale
       const state = input?.refresh || refreshedAt === 0 ? await refresh() : await loadBoard()
@@ -405,7 +481,7 @@ export default function activate(orca: OrcaWorkerApi): void {
     })
   )
 
-  orca.panels.handle('board.move', async ({ key, column, index }) => {
+  handle('board.move', async ({ key, column, index }) => {
     const board = await loadBoard()
     const card = board.cards[key]
     const synced = board.synced === true && (await syncOn())
@@ -424,7 +500,7 @@ export default function activate(orca: OrcaWorkerApi): void {
     }
     return mutate((s) => moveWorkspaceCards(s, key, column, index))
   })
-  orca.panels.handle('board.columns.set', async ({ columns }) => {
+  handle('board.columns.set', async ({ columns }) => {
     const synced = (await loadBoard()).synced === true && (await syncOn())
     return mutate((s) => setColumns(s, synced ? editSyncedColumns(s.columns, columns, workspaceStatus.values(), statusNames) : columns))
   })
@@ -435,14 +511,14 @@ export default function activate(orca: OrcaWorkerApi): void {
       orca.panels.post('board.changed', v)
       return v
     })
-  orca.panels.handle('sync.set', async ({ on }) => {
+  handle('sync.set', async ({ on }) => {
     await orca.settings.set('syncWorkspaceBoard', on === true)
     return resync()
   })
   orca.settings.onDidChange(() => void resync())
 
   // The name of an open chat is its Orca tab's title: rename the tab, then re-list.
-  orca.panels.handle('card.update', async (patch) => {
+  handle('card.update', async (patch) => {
     const handle = handles[patch.key]
     const sessionId = (await loadBoard()).cards[patch.key]?.sessionId
     if (typeof patch.label === 'string' && handle && (!sessionId || patch.label.trim())) {
@@ -459,16 +535,16 @@ export default function activate(orca: OrcaWorkerApi): void {
     return mutate((s) => updateCard(s, patch.key, patch))
   })
 
-  orca.panels.handle('card.seen', ({ key }) => mutate((s) => markUnseen(s, [key], null)))
+  handle('card.seen', ({ key }) => mutate((s) => markUnseen(s, [key], null)))
   // The panel has no log of its own: its notes about the reply boxes land in the plugin's log.
-  orca.panels.handle('trace', ({ message }) => {
+  handle('trace', ({ message }) => {
     orca.log(`panel: ${String(message).slice(0, 200)}`)
     return null
   })
-  orca.panels.handle('card.delete', ({ key }) => mutate((s) => deleteCard(s, key)))
-  orca.panels.handle('archive.clear', () => mutate(clearArchived))
+  handle('card.delete', ({ key }) => mutate((s) => deleteCard(s, key)))
+  handle('archive.clear', () => mutate(clearArchived))
 
-  orca.panels.handle('seen.check', () =>
+  handle('seen.check', () =>
     serial(async () => {
       const before = await loadBoard()
       const wasVisible = visible
@@ -482,7 +558,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   )
 
   // Hover preview: asked on demand, answered from Orca's agent record, kept nowhere.
-  orca.panels.handle('chat.preview', async ({ key, screen }) => {
+  handle('chat.preview', async ({ key, screen }) => {
     const found = {
       prompt: null as string | null,
       message: null as string | null,
@@ -524,13 +600,15 @@ export default function activate(orca: OrcaWorkerApi): void {
 
   // Reply box: what you typed goes to that chat's terminal as your prompt. Nothing else ever sends input.
   // Pictures pasted into the reply box arrive in pieces and wait here until Send.
-  orca.panels.handle('attach.put', ({ id, type, data }) => ({ result: putAttachment(String(id), String(type), String(data ?? ''), Date.now()) }))
-  orca.panels.handle('attach.drop', ({ id }) => {
+  handle('attach.put', ({ id, type, data, at }) => ({
+    result: putAttachment(String(id), String(type), String(data ?? ''), Date.now(), at === undefined || at === null ? undefined : Number(at))
+  }))
+  handle('attach.drop', ({ id }) => {
     dropAttachment(String(id))
     return null
   })
 
-  orca.panels.handle('chat.send', async ({ key, text, images }) => {
+  handle('chat.send', async ({ key, text, images }) => {
     const prompt = typeof text === 'string' ? text.trim().slice(0, MAX_PROMPT_CHARS) : ''
     const pictures = Array.isArray(images) ? images.filter((id): id is string => typeof id === 'string').slice(0, MAX_IMAGES) : []
     if (!prompt && !pictures.length) return { ok: false, error: 'empty' }
@@ -694,15 +772,15 @@ export default function activate(orca: OrcaWorkerApi): void {
 
   // A review by the judge, asked for in a reply box. It sends nothing to the chat: the judge reads
   // the chat's folder, and what it finds is offered in the reply box as a draft you send or not.
-  orca.panels.handle('judge.run', ({ key }) => startJudge(String(key)))
-  orca.panels.handle('judge.tally', async ({ key, how }) => {
+  handle('judge.run', ({ key }) => startJudge(String(key)))
+  handle('judge.tally', async ({ key, how }) => {
     if (how === 'asIs' || how === 'edited' || how === 'dropped') await mutate((s) => tallyDraft(s, String(key), how))
     return null
   })
 
   // A chat archived from its card: its tab is closed in Orca (there is no card without a tab to
   // keep it on the board), and the next listing archives the card with its column and note.
-  orca.panels.handle('chat.archive', async ({ key }) => {
+  handle('chat.archive', async ({ key }) => {
     if (refreshedAt === 0) await serial(refresh)
     const handle = handles[key]
     const card = (await loadBoard()).cards[key]
@@ -722,29 +800,65 @@ export default function activate(orca: OrcaWorkerApi): void {
     }
   })
 
-  // An archived Claude chat, opened again: a new Claude tab in its workspace (started by Orca, so
-  // its status is tracked) showing Claude's own list of conversations to resume. You pick there;
-  // nothing is chosen for you. The archived card moves to the new tab with its note and check.
-  orca.panels.handle('chat.reopen', async ({ key }) => {
+  /**
+   * Opens an archived Claude chat again in a new tab. With its session known, as that conversation;
+   * otherwise with Claude's list of conversations to pick from. Answers once the tab is there.
+   */
+  async function reopenChat(key: string, focus: boolean): Promise<void> {
+    const card = (await loadBoard()).cards[key]
+    if (!card) return
+    const handle = await launchAgent(card.worktreeId, 'claude', focus)
+    const { terminals } = await listTerminals()
+    const tab = terminals.find((t) => t.handle === handle)?.tabId
+    if (tab) await mutate((s) => adoptCard(s, key, tab))
+    // The rest takes Claude's start-up time, longer than a panel waits for an answer: it goes on
+    // after this one. Claude's prompt on the screen says it is ready for a command.
+    void (async () => {
+      for (let waited = 0; waited < REOPEN_WAIT_MS; waited += REOPEN_POLL_MS) {
+        await new Promise((done) => setTimeout(done, REOPEN_POLL_MS))
+        const rows = await readTerminalScreen(handle).catch(() => [])
+        if (rows.some((row) => /^[❯›>]/.test(row))) break
+      }
+      await sendToTerminal(handle, card.resume ? `/resume ${card.resume}` : '/resume')
+      await resync()
+    })().catch((err) => orca.log(`reopen failed: ${(err as Error).message.split('\n').pop()}`))
+  }
+
+  /**
+   * Orca was started again: the Claude chats that were open when it quit are opened again, each as
+   * its own conversation, in the background. Only with the setting on, only chats whose session
+   * the board had noted, and never after a mere reload of this worker (same run of Orca).
+   */
+  async function restoreAfterRestart(gone: string[]): Promise<void> {
+    const run = orcaRuntimeId()
+    if (!run) return
+    const last = await orca.storage.get(RUNTIME_KEY)
+    if (last === run) return
+    await orca.storage.set(RUNTIME_KEY, run)
+    if (typeof last !== 'string' || !gone.length || !(await restoreOn())) return
+    let opened = 0
+    for (const key of gone) {
+      const card = (await loadBoard()).cards[key]
+      if (!card?.closed || !card.resume || card.sessionId || card.agent !== 'claude') continue
+      if (opened >= MAX_RESTORED) break
+      try {
+        await reopenChat(key, false)
+        opened++
+      } catch (err) {
+        orca.log(`restore of ${key.slice(0, 8)} failed: ${(err as Error).message.split('\n').pop()}`)
+      }
+    }
+    if (opened) orca.log(`opened ${opened} chat(s) again after Orca restarted`)
+  }
+
+  // An archived Claude chat, opened again from its card: a new Claude tab in its workspace (started
+  // by Orca, so its status is tracked). The archived card moves to the new tab with its note and check.
+  handle('chat.reopen', async ({ key }) => {
     const card = (await loadBoard()).cards[key]
     if (!card || !card.closed) return { ok: false, error: 'open' }
     if (card.sessionId || card.agent !== 'claude') return { ok: false, error: 'unsupported' }
     try {
-      const handle = await launchAgent(card.worktreeId, 'claude')
-      const { terminals } = await listTerminals()
-      const tab = terminals.find((t) => t.handle === handle)?.tabId
-      if (tab) await mutate((s) => adoptCard(s, key, tab))
-      // The rest takes Claude's start-up time, longer than a panel waits for an answer: it goes on
-      // after this one. Claude's prompt on the screen says it is ready for a command.
-      void (async () => {
-        for (let waited = 0; waited < REOPEN_WAIT_MS; waited += REOPEN_POLL_MS) {
-          await new Promise((done) => setTimeout(done, REOPEN_POLL_MS))
-          const rows = await readTerminalScreen(handle).catch(() => [])
-          if (rows.some((row) => /^[❯›>]/.test(row))) break
-        }
-        await sendToTerminal(handle, '/resume')
-        await resync()
-      })().catch((err) => orca.log(`reopen failed: ${(err as Error).message.split('\n').pop()}`))
+      await reopenChat(key, true)
       return { ok: true, error: null }
     } catch (err) {
       const reason = (err as Error).message.split('\n').pop() ?? ''
@@ -753,7 +867,7 @@ export default function activate(orca: OrcaWorkerApi): void {
     }
   })
 
-  orca.panels.handle('chat.focus', async ({ key }) => {
+  handle('chat.focus', async ({ key }) => {
     let handle = handles[key]
     if (!handle) {
       await serial(refresh)

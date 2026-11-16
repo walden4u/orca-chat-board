@@ -211,11 +211,20 @@ let runner: OrcaRunner = defaultRunner
 /** Tests swap the CLI for a fake. */
 export function setOrcaRunner(next: OrcaRunner | null): void {
   runner = next ?? defaultRunner
+  runtimeId = null
+}
+
+let runtimeId: string | null = null
+
+/** Which run of Orca answered the last command: it changes when Orca is started again. Null until one answered. */
+export function orcaRuntimeId(): string | null {
+  return runtimeId
 }
 
 async function runJson(args: string[]): Promise<unknown> {
   const out = await runner([...args, '--json'])
-  const parsed = JSON.parse(out) as { ok?: boolean; result?: unknown; error?: { message?: string } }
+  const parsed = JSON.parse(out) as { ok?: boolean; result?: unknown; error?: { message?: string }; _meta?: { runtimeId?: unknown } }
+  if (typeof parsed._meta?.runtimeId === 'string') runtimeId = parsed._meta.runtimeId
   if (parsed.ok === false) throw new Error(parsed.error?.message ?? 'orca CLI failed')
   return parsed.result
 }
@@ -300,10 +309,10 @@ export async function sendToTerminal(handle: string, text: string): Promise<void
 /**
  * Starts an agent in a workspace the way a new agent tab does, in a terminal, and shows it. Orca
  * sets such a session up to report its status, which a bare `claude` typed into a shell would not.
- * Answers the new terminal's handle.
+ * Answers the new terminal's handle. Without `focus` the tab opens in the background.
  */
-export async function launchAgent(worktreeId: string, agent: string): Promise<string> {
-  const result = (await runJson(['agent', 'launch', '--agent', agent, '--worktree', `id:${worktreeId}`, '--surface', 'terminal', '--focus'])) as {
+export async function launchAgent(worktreeId: string, agent: string, focus = true): Promise<string> {
+  const result = (await runJson(['agent', 'launch', '--agent', agent, '--worktree', `id:${worktreeId}`, '--surface', 'terminal', ...(focus ? ['--focus'] : [])])) as {
     outcome?: { kind?: string; handle?: string }
   } | null
   const handle = result?.outcome?.handle

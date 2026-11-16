@@ -28,22 +28,34 @@ export function tempDir(host: OrcaHost): string | null {
   return local ? joinPath(host, local, 'Temp') : home ? joinPath(host, home, 'AppData', 'Local', 'Temp') : null
 }
 
-/** Takes the next piece of an image (base64, in order). Answers why not when it is refused. */
-export function putAttachment(id: string, type: string, data: string, now: number): 'ok' | 'type' | 'size' | 'count' {
+/** Pieces of one image when they are numbered (16 MB of base64 in pieces of a few kB would be fewer). */
+const MAX_PIECES = 4096
+
+/**
+ * Takes a piece of an image (base64). Without `at` it is the next piece, in order. With `at`
+ * (0, 1, 2…) it is that piece, whenever it arrives: pieces sent at the same time over a slow link
+ * (a board shown from another machine sends each in a command of its own) come in any order.
+ * Answers why not when it is refused.
+ */
+export function putAttachment(id: string, type: string, data: string, now: number, at?: number): 'ok' | 'type' | 'size' | 'count' {
   for (const [k, p] of pending) if (now - p.at > PENDING_MS) pending.delete(k)
   if (!isImageType(type) || !/^[\w-]{1,64}$/.test(id) || !/^[A-Za-z0-9+/=]*$/.test(data)) return 'type'
+  if (at !== undefined && !(Number.isInteger(at) && at >= 0 && at < MAX_PIECES)) return 'type'
   let entry = pending.get(id)
   if (!entry) {
     if (pending.size >= MAX_PENDING) return 'count'
     entry = { type, parts: [], size: 0, at: now }
     pending.set(id, entry)
   }
-  if (entry.size + data.length > MAX_BASE64_CHARS) {
+  // A numbered piece sent twice replaces itself.
+  const before = at === undefined ? 0 : (entry.parts[at]?.length ?? 0)
+  if (entry.size - before + data.length > MAX_BASE64_CHARS) {
     pending.delete(id)
     return 'size'
   }
-  entry.parts.push(data)
-  entry.size += data.length
+  if (at === undefined) entry.parts.push(data)
+  else entry.parts[at] = data
+  entry.size += data.length - before
   entry.at = now
   return 'ok'
 }
@@ -58,6 +70,8 @@ export function saveAttachment(id: string, host: OrcaHost, now: number): string 
   const tmp = tempDir(host)
   if (!entry || !tmp) return null
   pending.delete(id)
+  // A numbered piece that never came leaves a hole: the picture is not whole.
+  for (let i = 0; i < entry.parts.length; i++) if (entry.parts[i] === undefined) return null
   const dir = joinPath(host, tmp, FOLDER)
   mkdirSync(dir, { recursive: true })
   sweep(host, dir, now)

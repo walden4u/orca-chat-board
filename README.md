@@ -275,6 +275,15 @@ Orca does not keep agent tabs across a restart, so after one most cards are in t
 
 This works for Claude chats in terminal tabs. Other agents and Orca's chat tabs have no such button yet.
 
+### Open last chats again when Orca starts
+
+Quitting Orca closes every tab, so every card goes to the archive. With the setting **Open last chats again when Orca starts** (off by default), the Claude terminal chats that were open when Orca quit are opened again when it is back: each in a new tab in the background, as its own conversation, its card in the column it was in with its note and check. It happens when the board is first shown.
+
+- Chats that were already in the archive stay there, and at most 12 are opened.
+- Only chats the board saw while the setting was on: it needs to know which Claude session a tab runs, which Orca's CLI does not tell. The worker reads it, read-only, from the database Orca's agent hooks report to. That is not an official interface and can stop working with an Orca update; chats then stay in the archive as before.
+- The conversation comes back, not the work: an agent that was in the middle of something does not go on by itself.
+- With the setting on, Continue on an archived card also opens that conversation directly, without Claude's list to pick from.
+
 ## Sync with the Workspace Board
 
 Click **⇄** in the panel's toolbar, or turn on **Sync with the Workspace Board** in Settings. From then on the two boards show the same thing from two sides: Orca's board by workspace, this one by chat.
@@ -306,6 +315,7 @@ Under **Settings → Plugins → Chat Board**:
 | Check Orca automatically | on | The panel asks Orca what changed while it is on screen. See below. |
 | Show the chat in Orca with its reply box | off | Orca switches to a chat's tab when its reply box opens. See [Reply to a chat](#reply-to-a-chat). |
 | Pink for checked chats that wait for an answer | off | Checked chats whose agent has stopped are drawn pink. See [Pink](#pink-chats-that-wait-for-your-answer). |
+| Open last chats again when Orca starts | off | Opens the Claude terminal chats that were open when Orca quit. See [the archive](#open-last-chats-again-when-orca-starts). |
 | Goal mode | off | Shows Plan goal, Run goal and Review in the chat's box, and a card's goal progress. Off: none of it shows or runs. See [Goal mode](#goal-mode). |
 | Show agent logo | on | The agent's logo, or its name, on each card. |
 | Show workspace | on | The workspace's name on each card. |
@@ -395,6 +405,7 @@ Orca asks you to approve these when you load the plugin. Here is what each one i
 ### Files outside the plugin's own folder
 
 - **Read:** Orca's profile database, read-only, for the ids and names of the workspace statuses, and only while the sync is on. See [how the status names are read](#how-the-status-names-are-read).
+- **Read:** the database Orca's agent hooks report to (`agent-hooks/last-status.db` in Orca's data folder), read-only, for the Claude session id of each tab, and only while "Open last chats again" is on.
 - **Read:** `GOAL.md` in the folder of each open chat, with goal mode on, for the card's progress.
 - **Read:** the folder of a chat you review. Git reads it for what changed, and the judge reads and searches it. Nothing in it is changed.
 - **Written:** the images you attach in a reply box, as files in `orca-chat-board` under your temp folder, which the agent needs to read them.

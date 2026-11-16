@@ -84,6 +84,11 @@ export type StoredCard = {
   ptyId: string
   /** Set for an Orca chat tab (not a terminal): its chat session id. */
   sessionId?: string | null
+  /**
+   * The Claude Code session of a terminal chat, kept while "open last chats again" is on: with it
+   * the chat is opened again as that conversation, without Claude's list to pick from.
+   */
+  resume?: string
   closed: boolean
   closedAt: number | null
   /** When the agent finished (or started waiting) while you were not looking; null once seen. */
@@ -210,8 +215,18 @@ declare module 'orca' {
     'judge.run': { input: { key: string }; output: { ok: boolean; error: 'off' | 'closed' | 'busy' | 'no-folder' | string | null } }
     /** How you used the reply the judge drafted: sent as it was, sent after editing, or not used. */
     'judge.tally': { input: { key: string; how: keyof DraftTally }; output: null }
-    /** One piece (base64, in order) of a picture attached in the reply box; kept in memory until Send. */
-    'attach.put': { input: { id: string; type: string; data: string }; output: { result: 'ok' | 'type' | 'size' | 'count' } }
+    /**
+     * One piece (base64) of a picture attached in the reply box; kept in memory until Send. Pieces
+     * come in order, or with `at` (0, 1, 2…) in any order: a board shown from another machine
+     * sends them at the same time.
+     */
+    'attach.put': { input: { id: string; type: string; data: string; at?: number }; output: { result: 'ok' | 'type' | 'size' | 'count' } }
+    /**
+     * Asked by the board shown from another machine (through the orca CLI): this worker starts
+     * answering the same requests over HTTP on the machine's Tailscale address, for whoever sends
+     * the token. Answers where; `error` when the machine has no such address or no port.
+     */
+    'remote.open': { input: null; output: { address: string; port: number; token: string } | { error: string } }
     /** Forgets a picture that was attached and not sent. */
     'attach.drop': { input: { id: string }; output: null }
   }

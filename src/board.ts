@@ -155,6 +155,18 @@ export function adoptCard(prev: BoardState, archivedKey: string, tabKey: string)
   return { ...prev, cards }
 }
 
+/** Notes the Claude session of each open terminal chat (tab id → session id), where it is known and new. */
+export function setSessions(prev: BoardState, sessions: Record<string, string>): BoardState {
+  let cards: BoardState['cards'] | null = null
+  for (const card of Object.values(prev.cards)) {
+    const id = sessions[card.key]
+    if (!id || card.closed || card.sessionId || card.agent !== 'claude' || card.resume === id) continue
+    cards ??= { ...prev.cards }
+    cards[card.key] = { ...card, resume: id }
+  }
+  return cards ? { ...prev, cards } : prev
+}
+
 /** Puts `key` at `index` among the open cards of `column` and renumbers that column. */
 export function moveCard(prev: BoardState, key: string, column: string, index: number): BoardState {
   const card = prev.cards[key]

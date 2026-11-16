@@ -3,6 +3,7 @@ import { afterEach, assert, mockHost, mountWorker, test } from 'orca/testing'
 import * as main from './worker.ts'
 import { setOrcaRunner } from './cli.ts'
 import { setToolRunner } from './tools.ts'
+import { sessionsOf, setSessionsReader } from './sessions.ts'
 import { activeTabsByWorktree, cleanTitle, defaultColumns, emptyBoard, mergeChats, moveCard, setColumns, type LiveTerminal } from './board.ts'
 import type { BoardView, CardView } from './protocol.ts'
 import { looksBusy, suggestionOf } from './screen.ts'
@@ -52,6 +53,7 @@ const host = (storage: Record<string, unknown> = {}, focusedHandles: () => strin
 afterEach(() => {
   setOrcaRunner(null)
   setToolRunner(null)
+  setSessionsReader(null)
 })
 
 test('new agent chats land in the first column; plain shells are skipped', async () => {
@@ -626,6 +628,19 @@ test('pictures attached in the reply box are pasted as file paths before the tex
   assert.deepEqual(sends().at(-1), ['--enter'])
   unlinkSync(sends().at(-2)![0]!.slice('--text=\x1b[200~'.length, -'\x1b[201~'.length))
   assert.deepEqual(await worker.request('chat.send', { key: 'tab1', text: 'again', images: ['pic-2'] }), { ok: false, error: 'image-lost' })
+
+  // Numbered pieces come in any order (a board shown from another machine sends them at once).
+  assert.deepEqual(await worker.request('attach.put', { id: 'pic-3', type: 'image/png', data: png.slice(80), at: 2 }), { result: 'ok' })
+  assert.deepEqual(await worker.request('attach.put', { id: 'pic-3', type: 'image/png', data: png.slice(0, 40), at: 0 }), { result: 'ok' })
+  assert.deepEqual(await worker.request('attach.put', { id: 'pic-3', type: 'image/png', data: png.slice(40, 80), at: 1 }), { result: 'ok' })
+  assert.deepEqual(await worker.request('attach.put', { id: 'pic-3', type: 'image/png', data: 'AAAA', at: -1 }), { result: 'type' })
+  assert.deepEqual(await worker.request('chat.send', { key: 'tab1', text: '', images: ['pic-3'] }), { ok: true, error: null })
+  const whole = sends().at(-2)![0]!.slice('--text=\x1b[200~'.length, -'\x1b[201~'.length)
+  assert.deepEqual([...readFileSync(whole)], [...Buffer.from(png, 'base64')], 'the pieces are put together by their numbers')
+  unlinkSync(whole)
+  // A piece that never came: the picture is not sent as half of itself.
+  await worker.request('attach.put', { id: 'pic-4', type: 'image/png', data: png.slice(40), at: 1 })
+  assert.deepEqual(await worker.request('chat.send', { key: 'tab1', text: '', images: ['pic-4'] }), { ok: false, error: 'image-lost' })
   await worker.deactivate()
 })
 
@@ -1026,4 +1041,70 @@ test('a review runs the check command GOAL.md names and hands its output to the 
   await cardWhen(worker, 'tab1', (c) => c.judge?.state === 'done' && !c.judge.check)
   assert.equal(toolCalls.some((c) => c.tool === 'shell'), false)
   await worker.deactivate()
+})
+
+test('the Claude session of a tab is read from the rows of Orca’s hook database', () => {
+  const row = (tabId: string, id: unknown, source = 'claude') => JSON.stringify({ tabId, source, providerSession: { key: 'session_id', id } })
+  const a = '11111111-2222-3333-4444-555555555555'
+  const b = '99999999-2222-3333-4444-555555555555'
+  assert.deepEqual(sessionsOf([row('t1', a), 'not json', row('t2', '; rm -rf'), row('t3', a, 'codex'), JSON.stringify({ tabId: 't4' }), row('t1', b)]), { t1: b })
+})
+
+test('with the setting on, the Claude chats open when Orca quit are opened again when it is back', async () => {
+  const ID1 = '11111111-2222-3333-4444-555555555555'
+  const calls: string[][] = []
+  let run = 'run-a'
+  let live = [term(1), term(2), term(3)]
+  let launched = 0
+  setOrcaRunner(async (args) => {
+    calls.push(args)
+    const answer = (result: unknown) => JSON.stringify({ ok: true, result, _meta: { runtimeId: run } })
+    if (args[0] === 'terminal' && args[1] === 'list') return answer({ terminals: live, visualLayouts: [] })
+    if (args[0] === 'agent' && args[1] === 'launch') {
+      launched++
+      live = [...live, term(10 + launched, { title: 'Claude Code' })]
+      return answer({ outcome: { kind: 'terminal', handle: `term_${10 + launched}` } })
+    }
+    if (args[1] === 'read') return answer({ terminal: { tail: ['Claude Code', '❯ Try "fix it"'] } })
+    if (args[1] === 'send') return answer({ send: { accepted: true } })
+    if (args[1] === 'ps') return answer({ worktrees: [] })
+    throw new Error(`unexpected ${args.join(' ')}`)
+  })
+  // Orca knows the session of tab1 only; tab3 is closed by hand before Orca quits.
+  setSessionsReader(async () => ({ tab1: ID1 }))
+  // One host for the three runs of the worker: what the board stored stays.
+  const shared = mockHost({ settings: { restoreChats: true }, results: { 'agents.list': { agents: [] }, 'workspace.readContext': null } })
+  const on = () => shared
+  const first = await mountWorker(main, { host: on() })
+  await first.request('board.get', { refresh: true })
+  await first.request('card.update', { key: 'tab1', note: 'keep me' })
+  live = [term(1), term(2)]
+  await first.request('board.get', { refresh: true })
+  await new Promise((done) => setTimeout(done, 50))
+  assert.equal(calls.some((c) => c[0] === 'agent'), false)
+  await first.deactivate()
+
+  // The same run of Orca, the worker loaded again with a chat gone meanwhile: nothing is opened.
+  live = [term(1)]
+  const again = await mountWorker(main, { host: on() })
+  await again.request('board.get', { refresh: true })
+  await new Promise((done) => setTimeout(done, 50))
+  assert.equal(calls.some((c) => c[0] === 'agent'), false)
+  await again.deactivate()
+
+  // Orca was quit and started: no tab is left.
+  run = 'run-b'
+  live = []
+  const second = await mountWorker(main, { host: on() })
+  await second.request('board.get', { refresh: true })
+  await new Promise((done) => setTimeout(done, 2200))
+  // Only tab1: its session was known and it was open at the end. In the background, as itself.
+  assert.deepEqual(
+    calls.filter((c) => c[0] === 'agent'),
+    [['agent', 'launch', '--agent', 'claude', '--worktree', `id:${WT}`, '--surface', 'terminal', '--json']]
+  )
+  assert.deepEqual(calls.find((c) => c[1] === 'send'), ['terminal', 'send', '--terminal', 'term_11', `--text=/resume ${ID1}`, '--enter', '--json'])
+  const open = ((await second.request('board.get', {})) as BoardView).cards.filter((c) => !c.closed)
+  assert.deepEqual(open.map((c) => [c.key, c.note, c.handle]), [['tab11', 'keep me', 'term_11']])
+  await second.deactivate()
 })
