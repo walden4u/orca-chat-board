@@ -92,6 +92,39 @@ export default function activate(orca: OrcaWorkerApi): void {
     placeOf = Object.fromEntries(cards.map((c) => [c.key, { handle: c.handle ?? null, chatTab: !!c.sessionId, worktreeId: c.worktreeId ?? '' }]))
   }
 
+  /**
+   * Checked chats that finished and were not seen on this machine, by card key, with when. The
+   * server keeps one unseen mark a card, and its own panel (open on a screen nobody may be
+   * sitting at) opens the reply box first and clears it, so this panel would never hear of it.
+   * This machine keeps its own: set when a checked chat stops working or the server marks it,
+   * cleared when its box opens here, when it is answered from here or when it works again.
+   */
+  const unseenHere: Record<string, number> = {}
+  /** The mark each chat had when it was seen here. */
+  const seenHere: Record<string, number> = {}
+  const sawHere = (key: string): void => {
+    if (unseenHere[key]) seenHere[key] = unseenHere[key]
+    delete unseenHere[key]
+  }
+  let wasWorking: Record<string, boolean> | null = null
+  type SeenCard = { key: string; watch?: boolean; closed?: boolean; state?: string | null; mainState?: string | null; stateAt?: number; unseenAt?: number | null }
+  const adorn = (board: unknown): void => {
+    const cards = (board as { cards: SeenCard[] }).cards
+    const working: Record<string, boolean> = {}
+    for (const c of cards) {
+      // Orca's monitoring mode (working overall, the main agent's turn over) is a finished turn.
+      const busy = c.state === 'working' && (!c.mainState || c.mainState === 'working')
+      working[c.key] = busy
+      if (busy || c.closed || !c.watch) delete unseenHere[c.key]
+      // The server's own mark, unless it is the one just seen here (it clears it a moment later).
+      else if (c.unseenAt && c.unseenAt !== seenHere[c.key]) unseenHere[c.key] ??= c.unseenAt
+      else if (wasWorking?.[c.key] && c.state) unseenHere[c.key] = c.stateAt || Date.now()
+      if (unseenHere[c.key]) c.unseenAt = unseenHere[c.key]
+    }
+    for (const key of Object.keys(unseenHere)) if (!(key in working)) delete unseenHere[key]
+    wasWorking = working
+  }
+
   /** Why a chat's tab is not showing, for the panel's message. */
   const WHY: Record<string, string> = {
     'not-paired': '브라우저 탭의 Orca 웹 화면이 아직 서버와 연결되지 않았습니다. 그 탭에 페어링 링크를 한 번 붙여 넣어 주세요.',
@@ -153,11 +186,14 @@ export default function activate(orca: OrcaWorkerApi): void {
         if (here) return here
       }
       const began = Date.now()
+      // Its box opened here, or it was answered from here: seen on this machine.
+      if (name === 'card.seen' || name === 'chat.send') sawHere(String((input as { key?: unknown } | null)?.key ?? ''))
       const result = await ask(name, input)
       // The slow ones are worth knowing: each is at least one command to the server.
       if (name === 'attach.put' || name === 'chat.send') orca.log(`${name} took ${Date.now() - began} ms`)
       // Most requests answer the whole board: the panel shows it, so it is what the next poll compares with.
       if (isBoard(result)) {
+        adorn(result)
         shown = JSON.stringify(result)
         boardAt = Date.now()
         noteBoard(result)
@@ -169,7 +205,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   // Whether the server answers directly: the panel then sends pictures as they are.
   orca.panels.handle('link.direct' as never, (() => isDirect()) as never)
 
-  orca.panels.handle('trace' as never,((input: { message?: unknown } | null) => {
+  orca.panels.handle('trace' as never, ((input: { message?: unknown } | null) => {
     orca.log(`panel: ${String(input?.message).slice(0, 200)}`)
   }) as never)
 
@@ -184,6 +220,7 @@ export default function activate(orca: OrcaWorkerApi): void {
         await ready
         const board = await ask('board.get', {})
         boardAt = Date.now()
+        if (isBoard(board)) adorn(board)
         const text = JSON.stringify(board)
         if (isBoard(board) && text !== shown) {
           shown = text
