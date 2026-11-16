@@ -1,0 +1,449 @@
+// Runs the `orca` CLI from the worker. The plugin host API only sees the focused workspace and
+// cannot focus a terminal; the CLI lists every terminal and switches tabs.
+import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import type { LiveTerminal } from './board.ts'
+
+export type OrcaRunner = (args: string[]) => Promise<string>
+
+/** What the resolver needs to know about the machine; tests pass a fake one. */
+export type OrcaHost = {
+  platform: string
+  env: Record<string, string | undefined>
+  /** The worker's own binary: Orca's Electron, which forks plugin workers as Node. */
+  execPath?: string
+  resourcesPath?: string
+}
+
+/**
+ * One way to start the CLI. `exec` runs `file` directly (no shell); `cmd` is a Windows
+ * `.cmd`/`.bat` wrapper, which Node can only start through cmd.exe.
+ */
+export type OrcaCommand = { kind: 'exec' | 'cmd'; file: string; args: string[]; env?: Record<string, string> }
+
+/** A ready-to-spawn process: the arguments for execFile. */
+export type OrcaInvocation = { file: string; args: string[]; verbatim: boolean; env?: Record<string, string> }
+
+export function envGet(host: OrcaHost, name: string): string | undefined {
+  if (host.platform !== 'win32') return host.env[name]
+  // Windows variable names are case-insensitive (`Path`, `PATH`, `ComSpec`).
+  const key = Object.keys(host.env).find((k) => k.toUpperCase() === name.toUpperCase())
+  return key === undefined ? undefined : host.env[key]
+}
+
+export function joinPath(host: OrcaHost, ...parts: string[]): string {
+  const sep = host.platform === 'win32' ? '\\' : '/'
+  return parts.map((p, i) => (i === 0 ? p.replace(/[\\/]+$/, '') : p.replace(/^[\\/]+|[\\/]+$/g, ''))).join(sep)
+}
+
+function dirname(path: string): string {
+  return path.replace(/[\\/]+[^\\/]*$/, '')
+}
+
+/** Orca's `resources` folder, from Electron's `process.resourcesPath` or the binary's location. */
+function resourcesDir(host: OrcaHost): string | null {
+  if (host.resourcesPath) return host.resourcesPath
+  const exe = host.execPath
+  if (!exe || !/^orca/i.test(exe.split(/[\\/]/).pop() ?? '')) return null
+  // macOS: Orca.app/Contents/MacOS/Orca -> Orca.app/Contents/Resources; else <install>/resources.
+  if (host.platform === 'darwin') return joinPath(host, dirname(dirname(exe)), 'Resources')
+  return joinPath(host, dirname(exe), 'resources')
+}
+
+/** Orca's bundled launcher name: `orca-ide` on Linux (bare `orca` there is the GNOME screen reader). */
+function launcherName(platform: string): string {
+  return platform === 'win32' ? 'orca.exe' : platform === 'linux' ? 'orca-ide' : 'orca'
+}
+
+/** First `name` on PATH, trying each PATHEXT extension like cmd.exe does. */
+export function findOnWindowsPath(host: OrcaHost, name: string, exists: (path: string) => boolean): string | null {
+  const exts = (envGet(host, 'PATHEXT') || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+  const dirs = (envGet(host, 'PATH') ?? '').split(';').map((d) => d.trim().replace(/^"(.*)"$/, '$1')).filter(Boolean)
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      const path = joinPath(host, dir, name + ext.toLowerCase())
+      if (exists(path)) return path
+    }
+  }
+  return null
+}
+
+function windowsCommand(file: string): OrcaCommand {
+  return { kind: /\.(cmd|bat)$/i.test(file) ? 'cmd' : 'exec', file, args: [] }
+}
+
+/**
+ * The ways to start the CLI, best first:
+ * 1. The launcher Orca ships in `resources/bin` (`orca`, `orca-ide`, or the native `orca.exe`,
+ *    which Orca built because cmd.exe/.ps1 shims cannot pass every argument intact).
+ * 2. The CLI script itself, run by Orca's Electron as Node, as that launcher does.
+ * 3. Wherever the user installed the CLI (`/usr/local/bin/orca`, `~/.local/bin/orca-ide`, PATH).
+ */
+export function orcaCommands(host: OrcaHost, exists: (path: string) => boolean): OrcaCommand[] {
+  const out: OrcaCommand[] = []
+  const add = (cmd: OrcaCommand) => {
+    if (!out.some((c) => c.file === cmd.file && c.args.join('\0') === cmd.args.join('\0'))) out.push(cmd)
+  }
+  const resources = resourcesDir(host)
+  if (resources) {
+    const launcher = joinPath(host, resources, 'bin', launcherName(host.platform))
+    if (exists(launcher)) add({ kind: 'exec', file: launcher, args: [] })
+    const script = joinPath(host, resources, 'app.asar.unpacked', 'out', 'cli', 'index.js')
+    if (host.execPath && exists(host.execPath) && exists(script)) {
+      add({ kind: 'exec', file: host.execPath, args: [script], env: { ELECTRON_RUN_AS_NODE: '1' } })
+    }
+  }
+  const home = envGet(host, host.platform === 'win32' ? 'USERPROFILE' : 'HOME')
+  if (host.platform === 'win32') {
+    const found = findOnWindowsPath(host, 'orca', exists)
+    if (found) add(windowsCommand(found))
+  } else if (host.platform === 'linux') {
+    if (home && exists(joinPath(host, home, '.local', 'bin', 'orca-ide'))) add({ kind: 'exec', file: joinPath(host, home, '.local', 'bin', 'orca-ide'), args: [] })
+    add({ kind: 'exec', file: 'orca-ide', args: [] })
+  } else {
+    const fixed = ['/usr/local/bin/orca', '/opt/homebrew/bin/orca', ...(home ? [joinPath(host, home, '.local', 'bin', 'orca')] : [])]
+    for (const file of fixed) if (exists(file)) add({ kind: 'exec', file, args: [] })
+    add({ kind: 'exec', file: 'orca', args: [] })
+  }
+  return out
+}
+
+// cmd.exe metacharacters, escaped with `^` (the approach of the `cross-spawn` package).
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g
+
+/**
+ * Quotes one argument for a program started through `cmd.exe /d /s /c "..."`. The inner
+ * quoting follows the MSVCRT rules (what the program's argv parser undoes); every cmd
+ * metacharacter then gets a `^`, twice for a .cmd/.bat file because cmd parses `%*` again
+ * when the batch file forwards it. Line breaks would end the command, so they become spaces.
+ */
+export function quoteCmdArg(arg: string, batchFile = true): string {
+  let a = arg.replace(/\0/g, '').replace(/[\r\n]+/g, ' ')
+  a = a.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, '$1$1')
+  a = `"${a}"`.replace(CMD_META, '^$1')
+  return batchFile ? a.replace(CMD_META, '^$1') : a
+}
+
+/** The process to spawn for `command` with the CLI arguments `args`. */
+export function orcaInvocation(command: OrcaCommand, args: string[], host: OrcaHost): OrcaInvocation {
+  if (command.kind === 'exec') return { file: command.file, args: [...command.args, ...args], verbatim: false, env: command.env }
+  const line = [command.file.replace(CMD_META, '^$1'), ...[...command.args, ...args].map((a) => quoteCmdArg(a))].join(' ')
+  const comspec = envGet(host, 'ComSpec')
+  const systemRoot = envGet(host, 'SystemRoot')
+  const shell = comspec && /^[a-z]:\\/i.test(comspec) ? comspec : systemRoot ? joinPath(host, systemRoot, 'System32', 'cmd.exe') : 'cmd.exe'
+  return { file: shell, args: ['/d', '/s', '/c', `"${line}"`], verbatim: true, env: command.env }
+}
+
+/**
+ * Variables to add to the CLI's environment. Orca starts plugin workers with a short list of
+ * variables that leaves out APPDATA, and on Windows the CLI needs it to find the running Orca.
+ */
+export function extraEnv(host: OrcaHost, env?: Record<string, string>): Record<string, string> | undefined {
+  const profile = envGet(host, 'USERPROFILE')
+  if (host.platform !== 'win32' || envGet(host, 'APPDATA') || !profile) return env
+  return { APPDATA: joinPath(host, profile, 'AppData', 'Roaming'), ...env }
+}
+
+/** The reason the CLI gives on stdout (`{"ok":false,"error":{"message":…}}`) when it fails. */
+function cliError(stdout: string): string {
+  try {
+    return (JSON.parse(stdout) as { error?: { message?: string } }).error?.message ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function execOnce(inv: OrcaInvocation): Promise<string> {
+  const env = extraEnv(currentHost(), inv.env)
+  return new Promise((resolve, reject) =>
+    execFile(
+      inv.file,
+      inv.args,
+      {
+        maxBuffer: 32 * 1024 * 1024,
+        // A passed-on panel request may take the 30 seconds a panel request is allowed.
+        timeout: 45000,
+        windowsHide: true,
+        windowsVerbatimArguments: inv.verbatim,
+        ...(env ? { env: { ...process.env, ...env } } : {})
+      },
+      (err, stdout, stderr) => {
+        if (err) {
+          const detail = stderr || cliError(stdout)
+          const e = new Error(`${err.message}${detail ? `\n${detail}` : ''}`) as Error & { code?: unknown; detail?: string }
+          e.code = (err as { code?: unknown }).code
+          e.detail = detail.trim()
+          reject(e)
+        } else resolve(stdout)
+      }
+    )
+  )
+}
+
+function currentHost(): OrcaHost {
+  return { platform: process.platform, env: process.env, execPath: process.execPath, resourcesPath: process.resourcesPath }
+}
+
+let resolved: OrcaCommand | null = null
+
+const defaultRunner: OrcaRunner = async (args) => {
+  const host = currentHost()
+  if (resolved) return execOnce(orcaInvocation(resolved, args, host))
+  const commands = orcaCommands(host, existsSync)
+  let last: unknown = new Error('orca CLI not found')
+  for (const command of commands) {
+    try {
+      const out = await execOnce(orcaInvocation(command, args, host))
+      resolved = command
+      return out
+    } catch (err) {
+      last = err
+      const code = (err as { code?: unknown }).code
+      if (code !== 'ENOENT' && code !== 'EACCES') {
+        resolved = command
+        throw err
+      }
+    }
+  }
+  throw last
+}
+
+let runner: OrcaRunner = defaultRunner
+
+/** Tests swap the CLI for a fake. */
+export function setOrcaRunner(next: OrcaRunner | null): void {
+  runner = next ?? defaultRunner
+  runtimeId = null
+}
+
+let runtimeId: string | null = null
+
+/** Which run of Orca answered the last command: it changes when Orca is started again. Null until one answered. */
+export function orcaRuntimeId(): string | null {
+  return runtimeId
+}
+
+/** The paired Orca server every command goes to (`--environment`); empty means this machine's own Orca. */
+let environment = 'L1-PC'
+
+export function setOrcaEnvironment(name: string): void {
+  environment = name.trim()
+}
+
+/**
+ * Calls a panel handler of a development plugin on the paired server, as that plugin's own panel
+ * would (`orca plugin dev request`), and answers what the handler answered.
+ */
+export async function requestRemote(pluginKey: string, name: string, input: unknown): Promise<unknown> {
+  const data = JSON.stringify(input ?? null)
+  let out: string
+  try {
+    out = await runner([
+      'plugin', 'dev', 'request', pluginKey, name, `--data=${data}`, '--panel', 'board',
+      ...(environment ? ['--environment', environment] : []),
+      '--json'
+    ])
+  } catch (err) {
+    // The command line (with the whole input in it) is no use to the reader: only the reason is.
+    const detail = (err as { detail?: string }).detail
+    throw new Error(detail || ((err as Error).message.split('\n').pop() ?? 'orca CLI failed'))
+  }
+  const parsed = JSON.parse(out) as { ok?: boolean; result?: { result?: unknown }; error?: { message?: string } }
+  if (parsed.ok === false) throw new Error(parsed.error?.message ?? 'orca CLI failed')
+  return parsed.result?.result
+}
+
+async function runJson(args: string[]): Promise<unknown> {
+  const out = await runner([...args, ...(environment ? ['--environment', environment] : []), '--json'])
+  const parsed = JSON.parse(out) as { ok?: boolean; result?: unknown; error?: { message?: string }; _meta?: { runtimeId?: unknown } }
+  if (typeof parsed._meta?.runtimeId === 'string') runtimeId = parsed._meta.runtimeId
+  if (parsed.ok === false) throw new Error(parsed.error?.message ?? 'orca CLI failed')
+  return parsed.result
+}
+
+/** A command for this machine's own Orca, whatever server the board shows. */
+async function runLocal(args: string[]): Promise<unknown> {
+  const out = await runner([...args, '--environment', 'local', '--json'])
+  const parsed = JSON.parse(out) as { ok?: boolean; result?: unknown; error?: { message?: string } }
+  if (parsed.ok === false) throw new Error(parsed.error?.message ?? 'orca CLI failed')
+  return parsed.result
+}
+
+/** The saved server's address (`ws://host:port`), from `orca environment show`. */
+export async function serverEndpoint(): Promise<string> {
+  const out = await runner(['environment', 'show', '--environment', environment, '--json'])
+  // The address sits somewhere in the answer; its field name is not a documented one.
+  const found = /wss?:\/\/[^"\\\s/]+/i.exec(out)
+  if (!found) throw new Error(`No address is saved for the server ${environment}`)
+  return found[0]
+}
+
+/** A workspace of this machine's Orca, to hold a browser tab. */
+export async function localWorktreeId(): Promise<string> {
+  const result = (await runLocal(['worktree', 'list'])) as { worktrees?: { id?: string }[] }
+  const id = result.worktrees?.find((w) => w.id)?.id
+  if (!id) throw new Error('This Orca has no workspace of its own to hold a browser tab')
+  return id
+}
+
+export async function listBrowserTabs(worktreeId: string): Promise<{ page: string; url: string }[]> {
+  const result = (await runLocal(['tab', 'list', '--worktree', `id:${worktreeId}`])) as {
+    tabs?: { browserPageId?: string; url?: string }[]
+  }
+  return (result.tabs ?? []).filter((t) => t.browserPageId).map((t) => ({ page: t.browserPageId!, url: t.url ?? '' }))
+}
+
+export async function createBrowserTab(url: string, worktreeId: string): Promise<string> {
+  const result = (await runLocal(['tab', 'create', '--url', url, '--worktree', `id:${worktreeId}`])) as { browserPageId?: string }
+  if (!result.browserPageId) throw new Error('Orca did not open a browser tab')
+  return result.browserPageId
+}
+
+/** Runs `expression` in a browser tab's page and answers its (awaited) value as text. */
+export async function evalInBrowserTab(page: string, expression: string): Promise<string> {
+  const result = (await runLocal(['eval', '--page', page, `--expression=${expression}`])) as { result?: unknown }
+  return String(result.result ?? '')
+}
+
+/** Brings a browser tab to the foreground of this machine's Orca. */
+export async function showBrowserTab(page: string, worktreeId: string): Promise<void> {
+  // `tab switch --focus` alone leaves the window on another workspace: the tab's own comes first.
+  await runLocal(['worktree', 'activate', '--worktree', `id:${worktreeId}`])
+  await runLocal(['tab', 'switch', '--page', page, '--worktree', `id:${worktreeId}`, '--focus'])
+}
+
+export async function listTerminals():Promise<{ terminals: LiveTerminal[]; layouts: unknown }> {
+  const result = (await runJson(['terminal', 'list', '--include-visual-layouts'])) as {
+    terminals?: LiveTerminal[]
+    visualLayouts?: unknown
+  }
+  return { terminals: result.terminals ?? [], layouts: result.visualLayouts ?? [] }
+}
+
+/** Sets the tab's title; an empty title resets it to the automatic one. */
+export async function renameTerminal(handle: string, title: string): Promise<void> {
+  await runJson(['terminal', 'rename', '--terminal', handle, '--title', title])
+}
+
+/** Orca's chat tabs (not terminals) start with this id prefix; the rest is the chat session id. */
+export const CHAT_TAB_PREFIX = 'structured-agent-session-'
+
+/** One agent row of `orca worktree ps` (only the fields the board uses). */
+export type PsAgent = {
+  paneKey: string
+  parentPaneKey?: string | null
+  state: 'working' | 'blocked' | 'waiting' | 'done'
+  agentType?: string | null
+  displayName?: string | null
+  conversationName?: string | null
+  prompt?: string | null
+  lastAssistantMessage?: string | null
+  hasLivePty?: boolean | null
+  interrupted?: boolean
+  stateStartedAt?: number
+  updatedAt?: number
+  activity?: { unread?: boolean; title?: string | null } | null
+}
+export type PsWorktree = { worktreeId: string; path: string; displayName?: string; agents?: PsAgent[] }
+
+/** Every workspace's agents as Orca tracks them, chat tabs included (`orca worktree ps`). */
+export async function listAgents(): Promise<PsWorktree[]> {
+  const result = (await runJson(['worktree', 'ps'])) as { worktrees?: PsWorktree[] }
+  return result.worktrees ?? []
+}
+
+/** Renames a chat tab (`orca chat rename`). */
+export async function renameChat(sessionId: string, name: string): Promise<void> {
+  await runJson(['chat', 'rename', '--session', sessionId, '--name', name])
+}
+
+/** Shows a workspace in Orca. Chat tabs cannot be focused from the CLI yet, so this is the closest. */
+export async function activateWorktree(worktreeId: string): Promise<void> {
+  await runJson(['worktree', 'activate', '--worktree', `id:${worktreeId}`])
+}
+
+/** Every workspace's status on Orca's Workspace Board (`orca worktree list`), by worktree id. */
+export async function listWorkspaceStatuses(): Promise<Map<string, string>> {
+  const result = (await runJson(['worktree', 'list'])) as { worktrees?: { id?: string; workspaceStatus?: string | null }[] }
+  const out = new Map<string, string>()
+  for (const w of result.worktrees ?? []) if (w.id && w.workspaceStatus) out.set(w.id, w.workspaceStatus)
+  return out
+}
+
+/** Moves a workspace to another column of Orca's Workspace Board. */
+export async function setWorkspaceStatus(worktreeId: string, status: string): Promise<void> {
+  const result = (await runJson(['worktree', 'set', '--worktree', `id:${worktreeId}`, '--workspace-status', status])) as {
+    warnings?: { code?: string; message?: string }[]
+  }
+  // Orca saves a status id it does not know and only warns: to the board that is a failure.
+  const unknown = result?.warnings?.find((w) => w.code === 'UNKNOWN_WORKSPACE_STATUS')
+  if (unknown) throw Object.assign(new Error(unknown.message ?? `Unknown workspace status ${status}`), { code: 'unknown_status' })
+}
+
+/** Types `text` into a terminal and presses Enter: in an agent's tab that submits it as your prompt. */
+export async function sendToTerminal(handle: string, text: string): Promise<void> {
+  // `--text=<text>` in one argument: after a bare `--text`, a text that starts with `--` is read as an option.
+  const result = (await runJson(['terminal', 'send', '--terminal', handle, `--text=${text}`, '--enter'])) as {
+    send?: { accepted?: boolean }
+  } | null
+  if (result?.send?.accepted === false) throw new Error('Orca did not accept the input')
+}
+
+/**
+ * Starts an agent in a workspace the way a new agent tab does, in a terminal, and shows it. Orca
+ * sets such a session up to report its status, which a bare `claude` typed into a shell would not.
+ * Answers the new terminal's handle. Without `focus` the tab opens in the background.
+ */
+export async function launchAgent(worktreeId: string, agent: string, focus = true): Promise<string> {
+  const result = (await runJson(['agent', 'launch', '--agent', agent, '--worktree', `id:${worktreeId}`, '--surface', 'terminal', ...(focus ? ['--focus'] : [])])) as {
+    outcome?: { kind?: string; handle?: string }
+  } | null
+  const handle = result?.outcome?.handle
+  if (!handle || result?.outcome?.kind !== 'terminal') throw new Error('Orca did not open a terminal for the agent')
+  return handle
+}
+
+/**
+ * Pastes `text` into a terminal's input without submitting it (a bracketed paste, written as is).
+ * Claude Code turns a pasted path of an image file into an attached image.
+ */
+export async function pasteIntoTerminal(handle: string, text: string): Promise<void> {
+  // The text must not end the paste itself or smuggle in other control sequences.
+  const clean = text.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
+  await runJson(['terminal', 'send', '--terminal', handle, `--text=\x1b[200~${clean}\x1b[201~`])
+}
+
+/** Closes a terminal's whole tab, as its close button does: the agent in it stops. */
+export async function closeTerminalTab(handle: string): Promise<void> {
+  await runJson(['terminal', 'close', '--terminal', handle, '--tab'])
+}
+
+/** Presses Enter in a terminal: submits what is in an agent's input. */
+export async function pressEnter(handle: string): Promise<void> {
+  await runJson(['terminal', 'send', '--terminal', handle, '--enter'])
+}
+
+/** The terminal's screen as it is drawn right now, one string per row (`orca terminal read --screen`). */
+export async function readTerminalScreen(handle: string): Promise<string[]> {
+  return (await readTerminal(handle)).rows
+}
+
+/**
+ * The screen's rows and `draft`: what sits in an agent's input without being part of the screen,
+ * either text typed and not sent or the agent's own suggestion for your next prompt.
+ */
+export async function readTerminal(handle: string): Promise<{ rows: string[]; draft: string | null }> {
+  const result = (await runJson(['terminal', 'read', '--terminal', handle, '--screen'])) as {
+    terminal?: { tail?: unknown; draft?: unknown }
+  } | null
+  const tail = result?.terminal?.tail
+  const draft = result?.terminal?.draft
+  return {
+    rows: Array.isArray(tail) ? tail.filter((row): row is string => typeof row === 'string') : [],
+    draft: typeof draft === 'string' && draft.trim() ? draft : null
+  }
+}
+
+export async function switchTerminal(handle: string): Promise<void> {
+  await runJson(['terminal', 'switch', '--terminal', handle])
+}
