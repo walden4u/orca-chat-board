@@ -3,7 +3,8 @@
 // (`orca plugin dev request … --environment <server>`), so the board, its columns, statuses,
 // reviews and settings are the server's own.
 import type { OrcaWorkerApi } from 'orca/worker'
-import { orcaEnvironment, requestRemote, setOrcaEnvironment, type RemoteTrouble } from './cli.ts'
+import { orcaEnvironment, setOrcaEnvironment, type RemoteTrouble } from './cli.ts'
+import { askServer, forgetDoor, isDirect } from './direct.ts'
 import { forgetWebTab, showChatInWebTab } from './webtab.ts'
 
 /** The Chat Board on the server: a development plugin, which is what `plugin dev request` can call. */
@@ -33,6 +34,8 @@ const REQUESTS = [
 
 /** The server's worker tells its own panels of changes, not this one: the board is asked this often instead. */
 const POLL_MS = 5000
+/** The same while the server answers directly (see direct.ts). */
+const DIRECT_POLL_MS = 1500
 /** No panel request for this long: no panel is open, so nothing is asked. */
 const PANEL_IDLE_MS = 60_000
 
@@ -49,7 +52,10 @@ export default function activate(orca: OrcaWorkerApi): void {
   orca.settings.onDidChange(() => {
     const before = orcaEnvironment()
     ready = applyServer().then(() => {
-      if (orcaEnvironment() !== before) forgetWebTab()
+      if (orcaEnvironment() !== before) {
+        forgetWebTab()
+        forgetDoor()
+      }
     })
   })
 
@@ -63,7 +69,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   /** A request to the server's Chat Board; a server that does not answer is said in plain words. */
   const ask = async (name: string, input: unknown): Promise<unknown> => {
     try {
-      return await requestRemote(TARGET, name, input)
+      return await askServer(TARGET, name, input, (line) => orca.log(line))
     } catch (err) {
       const trouble = (err as { trouble?: RemoteTrouble }).trouble
       if (!trouble) throw err
@@ -167,7 +173,8 @@ export default function activate(orca: OrcaWorkerApi): void {
   let polling = false
   setInterval(() => {
     const now = Date.now()
-    if (polling || now - askedAt > PANEL_IDLE_MS || now - boardAt < POLL_MS) return
+    // Asked directly a request costs next to nothing, so the board is kept fresher.
+    if (polling || now - askedAt > PANEL_IDLE_MS || now - boardAt < (isDirect() ? DIRECT_POLL_MS : POLL_MS)) return
     polling = true
     void (async () => {
       try {
@@ -186,7 +193,7 @@ export default function activate(orca: OrcaWorkerApi): void {
         polling = false
       }
     })()
-  }, POLL_MS)
+  }, 500)
 
   // Measured from an office machine over Tailscale (2026-11-16): one command to the server takes
   // 2.5 to 3.5 s there (0.8 s on the server's own machine), two or three at once take 3.6 s in
