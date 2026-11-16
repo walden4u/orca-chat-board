@@ -63,6 +63,8 @@ const MAX_PICTURE_BYTES = 10 * 1024 * 1024
  */
 // Each piece travels in one command line to the server (at most 32,767 characters on Windows).
 const PIECE_BYTES = 21_000
+/** How many pieces travel at once: each is an `orca` process on this machine. */
+const PIECES_AT_ONCE = 8
 
 /** The second click of a double-click on a card lands on the box that the first one opened. */
 const DOUBLE_CLICK_MS = 500
@@ -388,6 +390,36 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     if (forget) void orca.plugin.request('attach.drop', { id: p.id }).catch(() => undefined)
     refreshSend()
   }
+  /**
+   * The picture as a WebP no longer than 2000 pixels a side, when that is smaller: every 21 KB
+   * is one command to the server (close to a second), and a screenshot as PNG is many of them.
+   * A full-HD screenshot keeps its size. A GIF (it may move) is left as it is.
+   */
+  const lighter = async (file: File): Promise<Blob> => {
+    if (file.type === 'image/gif') return file
+    try {
+      const bitmap = await createImageBitmap(file)
+      const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return file
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+      bitmap.close()
+      // WebP and not JPEG: a screenshot of text is flat colour, which PNG already packs better
+      // than JPEG does (the first try sent every screenshot as the PNG it was).
+      const webp = await new Promise<Blob | null>((done) => canvas.toBlob(done, 'image/webp', 0.8))
+      const best = webp && webp.type === 'image/webp' && webp.size < file.size ? webp : file
+      void orca.plugin
+        .request('trace', { message: `picture ${canvas.width}x${canvas.height}: ${file.type} ${file.size} -> ${best.type} ${best.size} bytes, ${Math.ceil(best.size / PIECE_BYTES)} pieces` })
+        .catch(() => undefined)
+      return best
+    } catch {
+      return file
+    }
+  }
+
   const addPicture = async (file: File) => {
     if (readOnly || !open) return
     if (!PICTURE_TYPES.includes(file.type)) return
@@ -412,15 +444,25 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     status.textContent = ''
     refreshSend()
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer())
-      for (let at = 0; at < bytes.length; at += PIECE_BYTES) {
-        if (!pictures.includes(picture)) return
-        let binary = ''
-        const piece = bytes.subarray(at, at + PIECE_BYTES)
-        for (let i = 0; i < piece.length; i += 0x8000) binary += String.fromCharCode(...piece.subarray(i, i + 0x8000))
-        const { result } = await orca.plugin.request('attach.put', { id, type: file.type, data: btoa(binary) })
-        if (result !== 'ok') throw new Error(result)
+      const light = await lighter(file)
+      const bytes = new Uint8Array(await light.arrayBuffer())
+      // Each piece is a command of its own to the server, close to a second: they are numbered
+      // and sent several at a time, and the server puts them together by number.
+      const count = Math.ceil(bytes.length / PIECE_BYTES)
+      let next = 0
+      const sendPieces = async (): Promise<void> => {
+        while (next < count) {
+          if (!pictures.includes(picture)) return
+          const at = next++
+          let binary = ''
+          const piece = bytes.subarray(at * PIECE_BYTES, (at + 1) * PIECE_BYTES)
+          for (let i = 0; i < piece.length; i += 0x8000) binary += String.fromCharCode(...piece.subarray(i, i + 0x8000))
+          const { result } = await orca.plugin.request('attach.put', { id, type: light.type, data: btoa(binary), at } as never)
+          if (result !== 'ok') throw new Error(result)
+        }
       }
+      await Promise.all(Array.from({ length: Math.min(PIECES_AT_ONCE, count) }, sendPieces))
+      if (!pictures.includes(picture)) return
       picture.ready = true
       thumb.classList.remove('busy')
     } catch (err) {
