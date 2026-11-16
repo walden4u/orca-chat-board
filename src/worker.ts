@@ -45,7 +45,7 @@ import {
 } from './cli.ts'
 import { applyToolCall, monitorView, onRun, type StoredMonitor } from './monitor.ts'
 import { dropAttachment, putAttachment, saveAttachment } from './attach.ts'
-import { newToken, openDoor, type RemoteDoor, type RemoteHandler } from './remote.ts'
+import { newToken, openDoor, type OpenDoor, type RemoteDoor, type RemoteHandler } from './remote.ts'
 
 /** Storage key of the token a board on another machine must send; there once that board asked. */
 const REMOTE_TOKEN_KEY = 'remoteToken'
@@ -140,27 +140,61 @@ export default function activate(orca: OrcaWorkerApi): void {
     return (orca.panels.handle as unknown as (name: string, fn: RemoteHandler) => unknown)(name, fn)
   }) as unknown as typeof orca.panels.handle
   /** The door, once it was asked for (now, or before this worker was loaded again). */
-  let door: Promise<RemoteDoor> | null = null
-  const openRemote = (): Promise<RemoteDoor> =>
+  let door: Promise<OpenDoor> | null = null
+  /** The setting `remoteDoor`: off shuts the door and refuses to open it. */
+  const doorAllowed = async (): Promise<boolean> => {
+    try {
+      return (await orca.settings.get('remoteDoor')) !== false
+    } catch {
+      return true
+    }
+  }
+  const openRemote = (): Promise<OpenDoor> =>
     (door ??= (async () => {
+      if (!(await doorAllowed())) throw new Error('The door for other machines is turned off in this Chat Board’s settings')
       let token = await orca.storage.get(REMOTE_TOKEN_KEY)
       if (typeof token !== 'string' || !token) await orca.storage.set(REMOTE_TOKEN_KEY, (token = newToken()))
       const opened = await openDoor(handlers, token as string)
-      orca.log(`answering a board on another machine at ${opened.address}:${opened.port}`)
+      orca.log(`answering a board on another machine at ${opened.door.address}:${opened.door.port}`)
       return opened
     })().catch((err) => {
       door = null
       throw err
     }))
-  handle('remote.open', async () => {
+  const closeRemote = async (): Promise<void> => {
+    const was = door
+    door = null
+    if (!was) return
     try {
-      return await openRemote()
+      ;(await was).close()
+      orca.log('the door for other machines is shut')
+    } catch {
+      // It never opened.
+    }
+  }
+  const answerDoor = async (): Promise<RemoteDoor | { error: string }> => {
+    try {
+      return (await openRemote()).door
     } catch (err) {
       return { error: (err as Error).message }
     }
+  }
+  handle('remote.open', answerDoor)
+  // A new token: whoever held the old one is shut out. A board on a paired machine asks again
+  // through the orca CLI and goes on; anything else that had the token cannot.
+  handle('remote.renew', async () => {
+    await closeRemote()
+    await orca.storage.set(REMOTE_TOKEN_KEY, newToken())
+    return answerDoor()
   })
   // Asked for before: the door opens again with the worker, so that board goes on without asking.
   void orca.storage.get(REMOTE_TOKEN_KEY).then((token) => (token ? openRemote() : null)).catch(() => undefined)
+  orca.settings.onDidChange(() => void doorAllowed().then((allowed) => (allowed ? null : closeRemote())))
+  /** Tells every panel of a change: this Orca's, and the boards listening at the door. */
+  const post = (name: 'board.changed', payload: BoardView): void => {
+    orca.panels.post(name, payload)
+    void door?.then((d) => d.tell(name, payload)).catch(() => undefined)
+  }
 
   // Every read-modify-write of storage goes through this queue.
   let queue: Promise<unknown> = Promise.resolve()
@@ -468,7 +502,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       const next = fn(await loadBoard())
       await orca.storage.set(BOARD_KEY, next)
       const v = await view(next)
-      orca.panels.post('board.changed', v)
+      post('board.changed', v)
       return v
     })
   }
@@ -508,7 +542,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   const resync = () =>
     serial(async () => {
       const v = await view(await refresh())
-      orca.panels.post('board.changed', v)
+      post('board.changed', v)
       return v
     })
   handle('sync.set', async ({ on }) => {
@@ -552,7 +586,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       const v = await view(state)
       const cleared = Object.values(before.cards).some((c) => c.unseenAt && !state.cards[c.key]?.unseenAt)
       const moved = wasVisible.size !== visible.size || [...visible].some((k) => !wasVisible.has(k))
-      if (cleared || moved) orca.panels.post('board.changed', v)
+      if (cleared || moved) post('board.changed', v)
       return v
     })
   )
@@ -911,7 +945,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       timer = null
       void serial(async () => {
         const state = await refresh()
-        orca.panels.post('board.changed', await view(state))
+        post('board.changed', await view(state))
       })
     }, 400)
   })
@@ -928,7 +962,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       else if (monitors[handle]) delete monitors[handle]
       else return
       await orca.storage.set(MONITORS_KEY, monitors)
-      orca.panels.post('board.changed', await view(await loadBoard()))
+      post('board.changed', await view(await loadBoard()))
     })
   })
 
@@ -995,7 +1029,7 @@ export default function activate(orca: OrcaWorkerApi): void {
         board = next
         await orca.storage.set(BOARD_KEY, board)
       }
-      orca.panels.post('board.changed', await view(board))
+      post('board.changed', await view(board))
     })
   )
 }

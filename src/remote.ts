@@ -36,14 +36,23 @@ function sameToken(given: string, token: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
+/** An open door: where it is, a way to tell the boards listening what changed, and a way to shut it. */
+export type OpenDoor = { door: RemoteDoor; tell(name: string, payload: unknown): void; close(): void }
+
+/** A line this often on a quiet stream, so a listener can tell a dead one from a quiet one. */
+const PING_MS = 15_000
+
 /**
  * Starts answering `handlers` over HTTP: `POST /request` with `{ name, input }` and the token as
- * a bearer answers `{ ok: true, result }` or `{ ok: false, error }`. Rejects when the machine has
- * no tailnet address or no port can be listened on.
+ * a bearer answers `{ ok: true, result }` or `{ ok: false, error }`. `GET /events` is a stream
+ * (server-sent events) of what `tell` is given, as `{ name, payload }`: the board changing, which
+ * a board on another machine would otherwise have to keep asking for. Rejects when the machine
+ * has no tailnet address or no port can be listened on.
  */
-export function openDoor(handlers: Map<string, RemoteHandler>, token: string): Promise<RemoteDoor> {
+export function openDoor(handlers: Map<string, RemoteHandler>, token: string): Promise<OpenDoor> {
   const address = tailnetAddress()
   if (!address) return Promise.reject(new Error('This machine has no Tailscale address'))
+  const listeners = new Set<{ write(text: string): void; end(): void }>()
   const server = createServer((req, res) => {
     const answer = (status: number, body: unknown): void => {
       res.writeHead(status, { 'content-type': 'application/json' })
@@ -51,6 +60,13 @@ export function openDoor(handlers: Map<string, RemoteHandler>, token: string): P
     }
     const given = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? ''
     if (!sameToken(given, token)) return answer(401, { ok: false, error: 'unauthorized' })
+    if (req.method === 'GET' && req.url === '/events') {
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' })
+      res.write(': open\n\n')
+      listeners.add(res)
+      req.on('close', () => listeners.delete(res))
+      return
+    }
     if (req.method !== 'POST' || req.url !== '/request') return answer(404, { ok: false, error: 'not found' })
     const chunks: Uint8Array[] = []
     let size = 0
@@ -74,6 +90,30 @@ export function openDoor(handlers: Map<string, RemoteHandler>, token: string): P
   })
   // The door does not keep the worker alive on its own.
   server.unref()
+  const send = (text: string): void => {
+    for (const listener of listeners) {
+      try {
+        listener.write(text)
+      } catch {
+        listeners.delete(listener)
+      }
+    }
+  }
+  const ping = setInterval(() => send(': ping\n\n'), PING_MS)
+  ;(ping as { unref?: () => void }).unref?.()
+  const open = (door: RemoteDoor): OpenDoor => ({
+    door,
+    tell: (name, payload) => {
+      if (listeners.size) send(`data: ${JSON.stringify({ name, payload })}\n\n`)
+    },
+    close: () => {
+      clearInterval(ping)
+      for (const listener of listeners) listener.end()
+      listeners.clear()
+      server.close()
+      server.closeAllConnections()
+    }
+  })
   return new Promise((resolve, reject) => {
     let fallback = false
     server.on('error', (err: Error & { code?: string }) => {
@@ -83,7 +123,7 @@ export function openDoor(handlers: Map<string, RemoteHandler>, token: string): P
         server.listen(0, address)
       } else reject(err)
     })
-    server.on('listening', () => resolve({ address, port: server.address().port, token }))
+    server.on('listening', () => resolve(open({ address, port: server.address().port, token })))
     server.listen(PORT, address)
   })
 }

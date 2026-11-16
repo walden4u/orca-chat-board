@@ -227,6 +227,8 @@ declare module 'orca' {
      * the token. Answers where; `error` when the machine has no such address or no port.
      */
     'remote.open': { input: null; output: { address: string; port: number; token: string } | { error: string } }
+    /** Shuts the door, makes a new token and opens it again: whoever held the old token is shut out. */
+    'remote.renew': { input: null; output: { address: string; port: number; token: string } | { error: string } }
     /** Forgets a picture that was attached and not sent. */
     'attach.drop': { input: { id: string }; output: null }
   }

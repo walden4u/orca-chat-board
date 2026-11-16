@@ -46,11 +46,13 @@ declare module 'node:http' {
     url?: string
     headers: { authorization?: string }
     on(event: 'data', listener: (chunk: Uint8Array) => void): void
-    on(event: 'end', listener: () => void): void
+    on(event: 'end' | 'close', listener: () => void): void
     destroy(): void
   }
-  type Outgoing = { writeHead(status: number, headers: Record<string, string>): void; end(body: string): void }
+  type Outgoing = { writeHead(status: number, headers: Record<string, string>): void; write(text: string): void; end(body?: string): void }
   type Server = {
+    close(): void
+    closeAllConnections(): void
     listen(port: number, host: string): void
     on(event: 'error', listener: (err: Error & { code?: string }) => void): void
     on(event: 'listening', listener: () => void): void
