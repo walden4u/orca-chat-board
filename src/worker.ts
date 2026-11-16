@@ -166,7 +166,10 @@ export default function activate(orca: OrcaWorkerApi): void {
     }) as never)
   }
 
-  orca.panels.handle('trace' as never, ((input: { message?: unknown } | null) => {
+  // Whether the server answers directly: the panel then sends pictures as they are.
+  orca.panels.handle('link.direct' as never, (() => isDirect()) as never)
+
+  orca.panels.handle('trace' as never,((input: { message?: unknown } | null) => {
     orca.log(`panel: ${String(input?.message).slice(0, 200)}`)
   }) as never)
 

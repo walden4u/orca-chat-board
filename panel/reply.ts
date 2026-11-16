@@ -391,12 +391,14 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     refreshSend()
   }
   /**
-   * The picture as a WebP no longer than 2000 pixels a side, when that is smaller: every 21 KB
-   * is one command to the server (close to a second), and a screenshot as PNG is many of them.
-   * A full-HD screenshot keeps its size. A GIF (it may move) is left as it is.
+   * The picture to send. Through the orca CLI every 21 KB is one command to the server (seconds
+   * from an office machine), so it becomes a WebP no longer than 2000 pixels a side when that is
+   * smaller. A GIF (it may move) is left as it is.
    */
   const lighter = async (file: File): Promise<Blob> => {
     if (file.type === 'image/gif') return file
+    // Talking to the server directly, size costs next to nothing: the picture goes as it is.
+    if ((await orca.plugin.request('link.direct' as never).catch(() => false)) === true) return file
     try {
       const bitmap = await createImageBitmap(file)
       const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height))
