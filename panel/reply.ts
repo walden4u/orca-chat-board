@@ -461,7 +461,9 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
           if (result !== 'ok') throw new Error(result)
         }
       }
+      const began = Date.now()
       await Promise.all(Array.from({ length: Math.min(PIECES_AT_ONCE, count) }, sendPieces))
+      void orca.plugin.request('trace', { message: `picture sent: ${count} pieces at once in ${Date.now() - began} ms` }).catch(() => undefined)
       if (!pictures.includes(picture)) return
       picture.ready = true
       thumb.classList.remove('busy')

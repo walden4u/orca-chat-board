@@ -146,7 +146,10 @@ export default function activate(orca: OrcaWorkerApi): void {
         const here = await focusHere(String((input as { key?: unknown } | null)?.key ?? ''))
         if (here) return here
       }
+      const began = Date.now()
       const result = await ask(name, input)
+      // The slow ones are worth knowing: each is at least one command to the server.
+      if (name === 'attach.put' || name === 'chat.send') orca.log(`${name} took ${Date.now() - began} ms`)
       // Most requests answer the whole board: the panel shows it, so it is what the next poll compares with.
       if (isBoard(result)) {
         shown = JSON.stringify(result)
@@ -184,6 +187,10 @@ export default function activate(orca: OrcaWorkerApi): void {
       }
     })()
   }, POLL_MS)
+
+  // Measured from an office machine over Tailscale (2026-11-16): one command to the server takes
+  // 2.5 to 3.5 s there (0.8 s on the server's own machine), two or three at once take 3.6 s in
+  // all, six at once 6.4 s. So about a second a command however many run, on top of 2.5 s.
 
   // The manifest names these; this machine's own agents are not on this board.
   orca.events.on('agent.status.changed', () => undefined)
