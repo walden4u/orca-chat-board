@@ -275,6 +275,15 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .judge-evidence { margin: 0 0 4px 1.4em; color: var(--orca-muted-foreground); white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
 .reply-waiting { flex: none; color: var(--orca-muted-foreground); white-space: nowrap; }
 .reply-next { border-color: var(--orca-border); padding: 3px 10px; }
+/* A list the chat's screen asks you to pick from: what it asks, then one button an option. */
+.reply-menu { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 4px;
+  border: 1px solid var(--orca-primary); background: color-mix(in srgb, var(--orca-primary) 8%, transparent); }
+.reply-menu-asked { white-space: pre-wrap; word-break: break-word; line-height: 1.4; max-height: 9em; overflow-y: auto; }
+.reply-menu-list { display: flex; flex-direction: column; gap: 4px; }
+.reply-menu-option { display: flex; gap: 8px; align-items: baseline; text-align: left; padding: 4px 10px;
+  border-color: var(--orca-border); word-break: break-word; }
+.reply-menu-option.at { border-color: var(--orca-primary); }
+.reply-menu-key { flex: none; font-weight: 700; color: var(--orca-muted-foreground); }
 /* The goal button whose turn it is. */
 .reply-next.due { border-color: var(--orca-primary); color: var(--orca-foreground); font-weight: 600;
   background: color-mix(in srgb, var(--orca-primary) 16%, transparent); }

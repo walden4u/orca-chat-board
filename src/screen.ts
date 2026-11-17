@@ -16,6 +16,111 @@ export function suggestionOf(rows: readonly string[], draft: string | null): str
   return row ? clean(row.slice(2)) : null
 }
 
+/** A question the agent's program asks on its screen, with a list to pick from (see `menuOf`). */
+export type ScreenMenu = {
+  /** What is asked: the rows above the list, as they are on the screen. */
+  question: string
+  options: string[]
+  /** The option the screen's pointer (❯) is on. */
+  at: number
+  /** The list is numbered 1, 2, 3…: pressing a number picks at once. Otherwise arrows and Enter. */
+  numbered: boolean
+}
+
+const MENU_FOOT = /\bEnter to (confirm|select|save|continue|submit)\b/i
+const RULE = /^[\s─━═▔▁╌-]{8,}$/
+const MAX_OPTIONS = 9
+const MAX_QUESTION_ROWS = 14
+
+/**
+ * A list to pick from at the foot of the screen, as Claude Code draws them: "Resume this
+ * conversation? ❯ 1. Resume  2. Start a new conversation · Enter to confirm", a permission
+ * request, a question of the agent's, the trust question of a new folder ("❯ No, exit / Yes, I
+ * trust this folder", without numbers). Null unless all of it is there: the pointer on one of
+ * two or more options, and under them the line that says what Enter does. A prompt you typed
+ * starts with ❯ too, and has no such line under it.
+ */
+export function menuOf(rows: readonly string[]): ScreenMenu | null {
+  const all = rows.map((r) => r.trimEnd())
+  while (all.length && !all[all.length - 1]) all.pop()
+  // The line about Enter is the last thing on the screen, or nearly (it may wrap, or have a status row under it).
+  let foot = -1
+  for (let i = all.length - 1; i >= Math.max(0, all.length - 4); i--) {
+    if (MENU_FOOT.test(all[i]!)) {
+      foot = i
+      break
+    }
+  }
+  if (foot < 0) return null
+  let pointed = -1
+  for (let i = foot - 1; i >= Math.max(0, foot - 40); i--) {
+    if (/^\s*❯\s+\S/.test(all[i]!)) {
+      pointed = i
+      break
+    }
+  }
+  if (pointed < 0) return null
+  const label = (text: string) => text.split(/\s{2,}/)[0]!.trim()
+  const numberOf = (row: string) => /^\s*(?:❯\s+)?(\d+)\.\s+(\S.*)$/.exec(row)
+  const options: string[] = []
+  let at = 0
+  let first = pointed
+  const own = numberOf(all[pointed]!)
+  if (own) {
+    // Numbered: 1 up to the pointed one above it, the rest below. Rows in between describe an option.
+    const n = Number(own[1])
+    const found = new Map<number, string>([[n, label(own[2]!)]])
+    let want = n - 1
+    for (let i = pointed - 1; want >= 1 && i >= Math.max(0, pointed - 30); i--) {
+      const m = numberOf(all[i]!)
+      if (!m || Number(m[1]) !== want) continue
+      found.set(want--, label(m[2]!))
+      first = i
+    }
+    if (want >= 1) return null
+    want = n + 1
+    for (let i = pointed + 1; i < foot; i++) {
+      const m = numberOf(all[i]!)
+      if (m && Number(m[1]) === want) found.set(want++, label(m[2]!))
+    }
+    for (let k = 1; found.has(k); k++) options.push(found.get(k)!)
+    at = n - 1
+  } else {
+    // Not numbered: the rows right above and below whose text starts where the pointed one's does.
+    const col = all[pointed]!.indexOf('❯') + 2
+    const fits = (row: string | undefined) => !!row && row.length > col && !row.slice(0, col).trim() && row[col] !== ' '
+    while (fits(all[first - 1])) first--
+    let last = pointed
+    while (last + 1 < foot && fits(all[last + 1])) last++
+    for (let i = first; i <= last; i++) options.push(label(all[i]!.slice(col)))
+    at = pointed - first
+  }
+  if (options.length < 2 || options.length > MAX_OPTIONS || options.some((o) => !o)) return null
+  // The question: what stands above the list, up to the rule that sets the whole thing off.
+  const asked: string[] = []
+  for (let i = first - 1; i >= 0 && asked.length < MAX_QUESTION_ROWS; i--) {
+    const row = all[i]!
+    if (RULE.test(row) && row.trim()) break
+    if (/^\s*[❯●⎿✻✽✢]/u.test(row)) break
+    asked.unshift(row.trim())
+  }
+  while (asked.length && !asked[0]) asked.shift()
+  while (asked.length && !asked[asked.length - 1]) asked.pop()
+  return { question: asked.join('\n').replace(/\n{3,}/g, '\n\n').slice(0, 1500), options, at, numbered: !!own }
+}
+
+/**
+ * The keys that pick option `index` of a menu, as writes to the terminal one after the other: its
+ * number where the list is numbered (it picks at once), otherwise the arrows there and then Enter
+ * on its own. Both seen to work in Claude Code 2.1.327 (2026-11-18).
+ */
+export function keysFor(menu: ScreenMenu, index: number): string[] {
+  if (menu.numbered) return [String(index + 1)]
+  const steps = index - menu.at
+  const arrows = (steps > 0 ? '\x1b[B' : '\x1b[A').repeat(Math.abs(steps))
+  return arrows ? [arrows, '\r'] : ['\r']
+}
+
 /**
  * A coding agent's screen while a turn is running: Claude Code's spinner line
  * ("✽ Wrangling… (2m 22s · ↓ 9.4k tokens)"), or the "esc to interrupt" hint that Claude Code,

@@ -1,8 +1,16 @@
 // Hover preview: after a short pause on a card, asks the worker for your last prompt and the
 // agent's last reply and shows them in a popover. Nothing is cached beyond a few seconds.
+import type { ScreenMenu } from '../src/protocol.ts'
 import { t } from './i18n.ts'
 
-type Preview = { prompt: string | null; message: string | null; at: number | null; screen: string | null; suggestion: string | null }
+type Preview = {
+  prompt: string | null
+  message: string | null
+  at: number | null
+  screen: string | null
+  suggestion: string | null
+  menu?: ScreenMenu | null
+}
 
 const DELAY_MS = 400
 /** Right after a popover was open, the next card's shows almost at once (like system tooltips). */
