@@ -27,8 +27,13 @@ export type ScreenMenu = {
   numbered: boolean
 }
 
-const MENU_FOOT = /\bEnter to (confirm|select|save|continue|submit)\b/i
-const RULE = /^[\s─━═▔▁╌-]{8,}$/
+// A permission request has no word about Enter under it, only "Esc to cancel · Tab to amend".
+// "esc to interrupt" is a running turn's hint, not a list's.
+const MENU_FOOT = /\bEnter to (confirm|select|save|continue|submit)\b|\bEsc to (cancel|go back|resume|exit)\b/i
+/** A rule that sets a list and its question off from the rest of the screen. */
+const RULE = /^[\s─━═▔▁-]{8,}$/
+/** A dashed rule inside the question (a permission request frames its command so): a paragraph break. */
+const SOFT_RULE = /^[\s╌┄┈]{8,}$/
 const MAX_OPTIONS = 9
 const MAX_QUESTION_ROWS = 14
 
@@ -67,21 +72,29 @@ export function menuOf(rows: readonly string[]): ScreenMenu | null {
   let first = pointed
   const own = numberOf(all[pointed]!)
   if (own) {
-    // Numbered: 1 up to the pointed one above it, the rest below. Rows in between describe an option.
+    // Numbered: 1 up to the pointed one above it, the rest below. Rows in between describe an
+    // option, or carry on one too long for a row (a permission's "Yes, and always allow access
+    // to C:\…"): those follow a row that fills the screen's width, and are joined to it.
+    const width = Math.max(...all.map((r) => r.length))
+    const labelAt = (i: number, text: string) => {
+      let whole = text
+      for (let j = i; j + 1 < foot && all[j]!.length >= width - 1 && !numberOf(all[j + 1]!) && all[j + 1]!.trim(); j++) whole += all[j + 1]!.trim()
+      return label(whole)
+    }
     const n = Number(own[1])
-    const found = new Map<number, string>([[n, label(own[2]!)]])
+    const found = new Map<number, string>([[n, labelAt(pointed, own[2]!)]])
     let want = n - 1
     for (let i = pointed - 1; want >= 1 && i >= Math.max(0, pointed - 30); i--) {
       const m = numberOf(all[i]!)
       if (!m || Number(m[1]) !== want) continue
-      found.set(want--, label(m[2]!))
+      found.set(want--, labelAt(i, m[2]!))
       first = i
     }
     if (want >= 1) return null
     want = n + 1
     for (let i = pointed + 1; i < foot; i++) {
       const m = numberOf(all[i]!)
-      if (m && Number(m[1]) === want) found.set(want++, label(m[2]!))
+      if (m && Number(m[1]) === want) found.set(want++, labelAt(i, m[2]!))
     }
     for (let k = 1; found.has(k); k++) options.push(found.get(k)!)
     at = n - 1
@@ -102,7 +115,7 @@ export function menuOf(rows: readonly string[]): ScreenMenu | null {
     const row = all[i]!
     if (RULE.test(row) && row.trim()) break
     if (/^\s*[❯●⎿✻✽✢]/u.test(row)) break
-    asked.unshift(row.trim())
+    asked.unshift(SOFT_RULE.test(row) ? '' : row.trim())
   }
   while (asked.length && !asked[0]) asked.shift()
   while (asked.length && !asked[asked.length - 1]) asked.pop()

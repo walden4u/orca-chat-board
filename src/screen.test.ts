@@ -60,6 +60,38 @@ test('the question whether to resume a long conversation is a numbered list', ()
   assert.deepEqual(keysFor(menu!, 1), ['2'])
 })
 
+const PERMISSION = [
+  '❯ Bash 도구로 mkdir perm-check 를 실행해. 다른 일은 하지 마.',
+  '● Perm-check 디렉터리 생성',
+  '  ⎿  $ mkdir perm-check',
+  '──────────────────────────────────────────────────────────────────────────────────',
+  ' Bash command',
+  ' perm-check 디렉터리 생성',
+  '╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌',
+  ' mkdir perm-check',
+  '╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌',
+  ' Do you want to proceed?',
+  ' ❯ 1. Yes',
+  '   2. Yes, and always allow access to C:\\Users\\L1\\AppData\\Local\\Temp\\claude\\3d564',
+  '      34acc9a7d9a\\6ddb50af\\scratchpad\\menutest from',
+  '      this project',
+  '   3. Yes, and switch to auto mode · auto mode handles these prompts for you',
+  '   4. No',
+  ' Esc to cancel · Tab to amend'
+]
+
+test('a permission request, with no word about Enter under it and an option on three rows', () => {
+  const menu = menuOf(PERMISSION)
+  assert.deepEqual(menu?.options, [
+    'Yes',
+    'Yes, and always allow access to C:\\Users\\L1\\AppData\\Local\\Temp\\claude\\3d56434acc9a7d9a\\6ddb50af\\scratchpad\\menutest from',
+    'Yes, and switch to auto mode · auto mode handles these prompts for you',
+    'No'
+  ])
+  assert.equal(menu?.question, 'Bash command\nperm-check 디렉터리 생성\n\nmkdir perm-check\n\nDo you want to proceed?')
+  assert.deepEqual(keysFor(menu!, 3), ['4'])
+})
+
 test('a list without numbers is picked with the arrows and Enter', () => {
   const menu = menuOf(TRUST)
   assert.deepEqual(menu?.options, ['No, exit', 'Yes, I trust this folder'])
