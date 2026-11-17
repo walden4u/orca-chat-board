@@ -35,6 +35,11 @@ export type ReplyTarget = {
    * double-click. Not when it follows another box: there a quick second click is you closing boxes.
    */
   fromCard: boolean
+  /**
+   * The box opened because the arrow keys came to its card (a setting). It takes the keyboard, and
+   * leaves Orca's tab alone until you click in it: on the way past, nothing should move but the box.
+   */
+  byArrows: boolean
   /** Checked chats that finished and wait behind this one. */
   waiting: number
 }
@@ -54,7 +59,14 @@ export type ReplyHandlers = {
   onEngaged: () => Promise<boolean>
   /** After Orca was asked to show the chat: where the keyboard ended up, for the log. */
   onKeys: (what: string) => void
+  /**
+   * An arrow key in a field that holds nothing you typed: on to the box of the card that way
+   * (columns, rows). Left out, the arrow keys are the field's own, as they always were.
+   */
+  onArrow?: (dx: number, dy: number) => void
 }
+
+const ARROWS: Record<string, [number, number] | undefined> = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }
 
 /** A step of the mouse made for you (see `takeBack`): `KeysOp` of the worker's keys.ts. */
 export type MouseOp = 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'restore' | 'cancel'
@@ -645,6 +657,15 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // In a field you emptied, Tab brings back the reply drafted from the review, or else takes what
   // waits in the agent's own input (its suggestion for your next prompt), shown dimmed.
   input.onkeydown = (e) => {
+    // The arrow keys walk on to the next card's box while the field holds nothing of yours (empty,
+    // or the drafted reply as it was put there). A held key is one step, not a run of boxes.
+    const step = ARROWS[e.key]
+    const bare = !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && !e.isComposing && e.keyCode !== 229
+    if (step && handlers.onArrow && bare && !busy && (!input.value || input.value === filled)) {
+      e.preventDefault()
+      if (!e.repeat) handlers.onArrow(step[0], step[1])
+      return
+    }
     const again = draft ?? suggestion
     if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && again && !input.value && !readOnly) {
       e.preventDefault()
@@ -770,7 +791,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       if (moved) setTimeout(() => void takeBack(), 150)
     })
   }
-  if (target.auto) dialog.addEventListener('pointerdown', engage, true)
+  if (target.auto || target.byArrows) dialog.addEventListener('pointerdown', engage, true)
   else engage()
 
   const loadExchange = () =>
