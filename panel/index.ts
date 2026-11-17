@@ -1018,12 +1018,36 @@ function cardAt(dx: number, dy: number, openOnly: boolean): HTMLElement | null {
   }
 }
 
+/**
+ * With the reply boxes following the arrow keys, the keys go round the checked chats that are open:
+ * right and down to the next one in the board's order (column by column, top to bottom), left and
+ * up to the one before, and from the last on to the first. They are the chats you answer; the
+ * others are a click away. Null when none is checked: then the keys walk all the cards.
+ */
+function nextChecked(dir: 1 | -1): HTMLElement | null {
+  const all = [...document.querySelectorAll<HTMLElement>('.board .column .card')]
+  const checked = all.filter((el) => {
+    const c = view?.cards.find((x) => x.key === el.dataset.key)
+    return !!c?.watch && !c.closed
+  })
+  if (!checked.length) return null
+  const at = document.activeElement
+  const here = all.findIndex((c) => c === at || c.dataset.key === pickedKey)
+  // The keys are on no card yet: the first chat that waits for your answer, or the first one.
+  if (here < 0) return checked.find((c) => c.classList.contains('answer-due')) ?? checked[0]
+  const i = checked.indexOf(all[here])
+  if (i >= 0) return checked[(i + dir + checked.length) % checked.length]
+  // On a card that is not checked: the nearest checked one that way, round the end too.
+  const ahead = dir > 0 ? checked.find((c) => all.indexOf(c) > here) : [...checked].reverse().find((c) => all.indexOf(c) < here)
+  return ahead ?? (dir > 0 ? checked[0] : checked[checked.length - 1])
+}
+
 /** One step of the arrow keys, from the board or (with the setting on) from an open reply box. */
 function walk(dx: number, dy: number): void {
   const box = replyKey()
   // A box that opened by itself, or from a click: the keys go on from its card.
   if (box) pickedKey = box
-  const target = cardAt(dx, dy, arrowsOpenReply)
+  const target = arrowsOpenReply ? (nextChecked(dx + dy > 0 ? 1 : -1) ?? cardAt(dx, dy, true)) : cardAt(dx, dy, false)
   if (!target || (box && target.dataset.key === box)) return
   pickedKey = target.dataset.key ?? null
   if (!box) target.focus()
