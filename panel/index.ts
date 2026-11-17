@@ -365,9 +365,9 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       // You are at this box: with the setting on, Orca shows that chat's tab beside it.
       // With the setting on, the arrow keys go on from this box to the next card's.
       onArrow: arrowsOpenReply ? walk : undefined,
-      onEngaged: async (asked = false) => {
+      onEngaged: async (how = 'open') => {
         // Asked for with Enter in an empty field: shown whatever the setting says.
-        if ((!followChat && !asked) || c.closed) return false
+        if ((!followChat && how !== 'enter') || c.closed) return false
         // The chat comes up in the browser tab and the keyboard goes there with it: the mouse of
         // this machine is made ready to bring it back (see `takeBack` in reply.ts).
         void replyMouse('warm')

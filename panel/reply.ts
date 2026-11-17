@@ -46,6 +46,14 @@ export type ReplyTarget = {
   waiting: number
 }
 
+/**
+ * Why the chat itself is asked for: the box opened or was clicked ('open'), you pressed Enter in
+ * its empty field ('enter'), or the arrow keys brought you to it and you stayed ('stay').
+ */
+export type Engaged = 'open' | 'enter' | 'stay'
+/** How long the arrow keys rest on a chat before its tab is shown beside the box. */
+const STAY_MS = 1000
+
 export type ReplyHandlers = {
   onSent: (title: string) => void
   /** Show the chat itself in Orca. */
@@ -60,7 +68,7 @@ export type ReplyHandlers = {
    * You are at this box: at once for one you opened, at your first click for one that opened by
    * itself. Orca may move the keyboard while it answers; the field takes it back afterwards.
    */
-  onEngaged: (asked?: boolean) => Promise<boolean>
+  onEngaged: (how?: Engaged) => Promise<boolean>
   /** After Orca was asked to show the chat: where the keyboard ended up, for the log. */
   onKeys: (what: string) => void
   /**
@@ -737,7 +745,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229 || e.repeat) return
     e.preventDefault()
     // Enter with nothing to send asks for the chat itself, as a click in the box does.
-    if (!input.value.trim() && !pictures.length && !readOnly && !busy) return engage(true)
+    if (!input.value.trim() && !pictures.length && !readOnly && !busy) return engage('enter')
     void submit()
   }
   document.addEventListener('keydown', onKey, true)
@@ -843,14 +851,14 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     }, 0)
   }
   let engaged = false
-  // `asked`: you pressed Enter for it, so it is done again, and with the pointer anywhere.
-  const engage = (asked = false) => {
-    if (engaged && !asked) return
+  // Pressing Enter for it does it again, whatever was done before.
+  const engage = (how: Engaged = 'open') => {
+    if (engaged && how !== 'enter') return
     engaged = true
-    void handlers.onEngaged(asked).then((moved) => {
+    void handlers.onEngaged(how).then((moved) => {
       // A box that opened by itself leaves the keys alone until you are not typing (see `takeBack`).
       if (!target.auto && open && !readOnly && !busy && document.activeElement !== input) input.focus()
-      if (moved) setTimeout(() => void takeBack(target.auto && !asked), 150)
+      if (moved) setTimeout(() => void takeBack(target.auto && how === 'open'), 150)
     })
   }
   // On this board a box that opened by itself shows its chat at once too (asked for on
@@ -860,6 +868,16 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // nothing should move but the box.
   if (target.byArrows) dialog.addEventListener('pointerdown', () => engage(), true)
   else engage()
+  // The arrow keys came to this chat and stayed: its tab is shown as if you had asked. Not on
+  // the way past (each showing takes the keyboard away for a moment), and not once you type:
+  // letters typed in that moment would land in the terminal.
+  if (target.byArrows && !readOnly) {
+    let typed = false
+    input.addEventListener('input', () => (typed = true))
+    setTimeout(() => {
+      if (open && !busy && !typed) engage('stay')
+    }, STAY_MS)
+  }
 
   const loadExchange = () =>
     void loadPreview(target.key, true).then(
