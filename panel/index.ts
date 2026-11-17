@@ -86,6 +86,8 @@ let autoCheck = true
 let followChat = false
 /** A setting: the arrow keys open the reply box of the card they go to, and walk on from box to box. */
 let arrowsOpenReply = false
+/** A setting: a reply box the arrow keys opened shows its chat by itself once you stay on it. */
+let arrowsShowChat = false
 /** Setting: checked chats that wait for your answer are drawn pink, and so is the toolbar's edge. */
 /** Setting: checked chats that wait for your answer are drawn pink, and so is the toolbar's edge. */
 let pinkWaiting = false
@@ -123,6 +125,7 @@ async function loadSettings(): Promise<void> {
     autoCheck = s.autoCheck !== false
     followChat = s.followChat === true
     arrowsOpenReply = s.arrowsOpenReply === true
+    arrowsShowChat = s.arrowsShowChat === true
     pinkWaiting = s.pinkWaiting === true
     goalMode = s.goalMode === true
     setLanguage(s.language)
@@ -358,6 +361,7 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       auto: how === 'auto',
       fromCard: how === 'click',
       byArrows: how === 'arrow',
+      stayShows: arrowsShowChat,
       watched: c.watch === true,
       waiting: waitingCards(c.key).length
     },
@@ -366,8 +370,9 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       // With the setting on, the arrow keys go on from this box to the next card's.
       onArrow: arrowsOpenReply ? walk : undefined,
       onEngaged: async (how = 'open') => {
-        // Asked for with Enter in an empty field: shown whatever the setting says.
-        if ((!followChat && how !== 'enter') || c.closed) return false
+        // Asked for with Enter in an empty field, or by staying on the chat (a setting of its own):
+        // shown whatever "show the chat beside the box" says.
+        if ((!followChat && how === 'open') || c.closed) return false
         // The chat comes up in the browser tab and the keyboard goes there with it: the mouse of
         // this machine is made ready to bring it back (see `takeBack` in reply.ts).
         void replyMouse('warm')

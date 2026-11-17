@@ -40,6 +40,8 @@ export type ReplyTarget = {
    * leaves Orca's tab alone until you click in it: on the way past, nothing should move but the box.
    */
   byArrows: boolean
+  /** A setting: a box the arrow keys opened shows its chat by itself once you stay on it. */
+  stayShows: boolean
   /** The chat is checked: the box has its Finish button, which unchecks it. */
   watched: boolean
   /** Checked chats that finished and wait behind this one. */
@@ -879,10 +881,11 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // nothing should move but the box.
   if (target.byArrows) dialog.addEventListener('pointerdown', () => engage(), true)
   else engage()
+  // A setting (off unless you turn it on: without it, Enter in the empty field asks for the chat).
   // The arrow keys came to this chat and stayed: its tab is shown as if you had asked. Not on
   // the way past (each showing takes the keyboard away for a moment), and not once you type:
   // letters typed in that moment would land in the terminal.
-  if (target.byArrows && !readOnly) {
+  if (target.byArrows && target.stayShows && !readOnly) {
     let typed = false
     input.addEventListener('input', () => (typed = true))
     setTimeout(() => {
