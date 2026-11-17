@@ -432,9 +432,22 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   }
   const imagesOf = (data: DataTransfer | null) => [...(data?.files ?? [])].filter((f) => f.type.startsWith('image/'))
 
+  // Orca's window comes back to the front: the next keys belong to the answer, not to whichever
+  // button was pressed last.
+  const onShown = () => {
+    if (document.visibilityState !== 'visible') return
+    setTimeout(() => {
+      if (open && !readOnly && !busy && document.activeElement !== input) input.focus()
+    }, 0)
+  }
+  window.addEventListener('focus', onShown)
+  document.addEventListener('visibilitychange', onShown)
+
   const shutBox = () => {
     if (!open) return
     open = false
+    window.removeEventListener('focus', onShown)
+    document.removeEventListener('visibilitychange', onShown)
     for (const p of [...pictures]) removePicture(p)
     // What you typed is kept for this chat; what was only put there for you is offered afresh next time.
     if (input.value.trim() && input.value !== filled) drafts.set(target.key, input.value)
