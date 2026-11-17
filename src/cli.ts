@@ -357,6 +357,12 @@ export async function pressEnter(handle: string): Promise<void> {
   await runJson(['terminal', 'send', '--terminal', handle, '--enter'])
 }
 
+/** Writes keys to a terminal as they are (a number, arrow keys, Enter as `\r`): for a list on its screen. */
+export async function pressKeys(handle: string, keys: string): Promise<void> {
+  const result = (await runJson(['terminal', 'send', '--terminal', handle, `--text=${keys}`])) as { send?: { accepted?: boolean } } | null
+  if (result?.send?.accepted === false) throw new Error('Orca did not accept the input')
+}
+
 /** The terminal's screen as it is drawn right now, one string per row (`orca terminal read --screen`). */
 export async function readTerminalScreen(handle: string): Promise<string[]> {
   return (await readTerminal(handle)).rows

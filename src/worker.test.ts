@@ -587,7 +587,7 @@ test('hover preview answers the last prompt and reply from Orca, on demand', asy
     return JSON.stringify({ ok: true, result: {} })
   })
   const worker = await mountWorker(main, { host: host() })
-  const record = { prompt: 'fix the bug', message: 'Fixed it.', at: 9, screen: null, suggestion: null }
+  const record = { prompt: 'fix the bug', message: 'Fixed it.', at: 9, screen: null, suggestion: null, menu: null }
   assert.deepEqual(await worker.request('chat.preview', { key: 'tab1' }), record)
   assert.deepEqual(await worker.request('chat.preview', { key: 'nope' }), { ...record, prompt: null, message: null, at: null })
   assert.deepEqual(worker.host.data().storage, {}, 'nothing is stored')
@@ -608,6 +608,43 @@ test('hover preview answers the last prompt and reply from Orca, on demand', asy
   assert.equal(suggestionOf(['● Done.', '❯ Try "how do I log an error?"', '  auto mode on'], null), 'how do I log an error?')
   assert.equal(suggestionOf(['❯ commit this'], '  from the draft  '), 'from the draft')
   assert.equal(suggestionOf(['❯ a prompt already sent', '❯'], null), null)
+  await worker.deactivate()
+})
+
+test("a list on the chat's screen is offered by the reply box and picked by its keys", async () => {
+  const calls: string[][] = []
+  let rows = ['Resume this conversation?', '', '❯ 1. Resume', '  2. Start a new conversation', '', 'Enter to confirm · Esc to resume']
+  setOrcaRunner(async (args) => {
+    calls.push(args)
+    if (args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: [term(1)], visualLayouts: [] } })
+    if (args[1] === 'read') return JSON.stringify({ ok: true, result: { terminal: { tail: rows } } })
+    if (args[1] === 'send') return JSON.stringify({ ok: true, result: { send: { accepted: true } } })
+    if (args[1] === 'ps') return JSON.stringify({ ok: true, result: { worktrees: [] } })
+    throw new Error(`unexpected ${args.join(' ')}`)
+  })
+  const worker = await mountWorker(main, { host: host() })
+  await worker.request('board.get', { refresh: true })
+  const sends = () => calls.filter((c) => c[1] === 'send').map((c) => c.slice(4, -1))
+
+  const seen = (await worker.request('chat.preview', { key: 'tab1', screen: true })) as { menu: unknown; suggestion: unknown }
+  assert.deepEqual(seen.menu, { question: 'Resume this conversation?', options: ['Resume', 'Start a new conversation'], at: 0, numbered: true })
+  assert.equal(seen.suggestion, null, "the list's pointer is not a prompt waiting in the input")
+
+  // Its number picks at once, and nothing else is pressed.
+  assert.deepEqual(await worker.request('menu.pick', { key: 'tab1', index: 1, label: 'Start a new conversation' }), { ok: true, error: null })
+  assert.deepEqual(sends(), [['--text=2']])
+
+  // The screen moved on since the box read it: nothing is pressed.
+  assert.deepEqual(await worker.request('menu.pick', { key: 'tab1', index: 0, label: 'Yes' }), { ok: false, error: 'changed' })
+  rows = ['● Resumed.', '❯ ']
+  assert.deepEqual(await worker.request('menu.pick', { key: 'tab1', index: 0, label: 'Resume' }), { ok: false, error: 'changed' })
+  assert.equal(sends().length, 1)
+
+  // Without numbers: the arrows to it, then Enter on its own.
+  rows = [' Is this a project you trust?', ' ❯ No, exit', '   Yes, I trust this folder', ' Enter to confirm · Esc to cancel']
+  assert.deepEqual(await worker.request('menu.pick', { key: 'tab1', index: 1, label: 'Yes, I trust this folder' }), { ok: true, error: null })
+  assert.deepEqual(sends().slice(1), [['--text=\x1b[B'], ['--text=\r']])
+  assert.deepEqual(await worker.request('menu.pick', { key: 'nope', index: 0, label: 'No, exit' }), { ok: false, error: 'closed' })
   await worker.deactivate()
 })
 

@@ -1,7 +1,7 @@
 // Reply box: a card's whole last exchange (your prompt, the agent's reply) with a field to answer
 // it. Send types your text into that chat's terminal as the next prompt; nothing is sent before.
 // The box lives outside the board, so the board's redraws never touch what you are typing.
-import type { DraftTally, GoalFile, JudgeState } from '../src/protocol.ts'
+import type { DraftTally, GoalFile, JudgeState, ScreenMenu } from '../src/protocol.ts'
 import { t } from './i18n.ts'
 import { loadPreview, plain } from './preview.ts'
 
@@ -310,12 +310,19 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
 
   const foot = node('div', 'reply-foot')
   const hint = node('div', 'reply-hint')
+  // A list the chat's screen asks you to pick from (resume or start anew, a permission, a question
+  // of the agent's): its options as buttons. One press, or its number in the empty field, presses
+  // the keys for it in the terminal.
+  let menu: ScreenMenu | null = null
+  let picking = false
+  const menuBox = node('div', 'reply-menu')
+  menuBox.hidden = true
   const showHint = () => {
-    hint.textContent = target.chatTab ? t.replyChatTab : target.blocked ? t.replyBlocked : working ? t.replyWorking : ''
+    hint.textContent = target.chatTab ? t.replyChatTab : menu ? '' : target.blocked ? t.replyBlocked : working ? t.replyWorking : ''
     hint.hidden = !hint.textContent
   }
   showHint()
-  foot.append(hint)
+  foot.append(menuBox, hint)
   /** The one next step, in words: what is in the field and what Enter does, or that a review is due. */
   const advice = node('div', 'reply-hint reply-advice')
   advice.hidden = true
@@ -442,10 +449,57 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
 
   let open = true
   let busy = false
+  const pick = async (index: number) => {
+    const label = menu?.options[index]
+    if (!open || picking || busy || label === undefined) return
+    picking = true
+    showMenu()
+    status.textContent = ''
+    let result: { ok: boolean; error: string | null }
+    try {
+      result = await orca.plugin.request('menu.pick', { key: target.key, index, label })
+    } catch (err) {
+      result = { ok: false, error: (err as Error).message }
+    }
+    if (!open) return
+    if (!result.ok) status.textContent = result.error === 'changed' ? t.menuChanged : result.error === 'closed' ? t.chatClosed : t.menuFailed(result.error ?? '')
+    // The screen after the pick: the list is gone, or another one follows it.
+    setTimeout(
+      () => {
+        picking = false
+        if (open) loadExchange()
+      },
+      result.ok ? 1200 : 0
+    )
+  }
+  function showMenu(): void {
+    menuBox.replaceChildren()
+    menuBox.hidden = !menu
+    showHint()
+    if (!menu) return
+    if (menu.question) menuBox.append(node('div', 'reply-menu-asked', menu.question))
+    const list = node('div', 'reply-menu-list')
+    menu.options.forEach((label, i) => {
+      const b = node('button', `ghost reply-menu-option${i === menu!.at ? ' at' : ''}`)
+      b.append(node('span', 'reply-menu-key', String(i + 1)), node('span', '', label))
+      b.disabled = picking
+      b.onclick = () => void pick(i)
+      list.append(b)
+    })
+    menuBox.append(list, node('div', 'reply-hint', t.menuHint))
+  }
   const onKey = (e: KeyboardEvent) => {
     // Also in the middle of a Korean syllable: there the key arrives as `Process`, and only `code`
     // says it was Escape. What you typed is kept for this chat either way.
-    if ((e.key === 'Escape' || e.code === 'Escape') && !busy) leave(handlers.onClosed)
+    if ((e.key === 'Escape' || e.code === 'Escape') && !busy) return leave(handlers.onClosed)
+    // Where the field cannot be written in (a permission request), a number picks from the list
+    // on the chat's screen at once. In a field you can write in, a number may be the start of a
+    // sentence ("1번으로…"): there it is the number and then Enter (see the field's own keys).
+    const n = /^[1-9]$/.test(e.key) ? Number(e.key) : 0
+    if (!n || !readOnly || !menu || n > menu.options.length || e.ctrlKey || e.altKey || e.metaKey || e.isComposing || e.repeat) return
+    e.preventDefault()
+    e.stopPropagation()
+    void pick(n - 1)
   }
   // Pictures: pasted or dropped here, handed to the worker in pieces, attached to the prompt on Send.
   type Picture = { id: string; url: string; ready: boolean; thumb: HTMLElement }
@@ -701,6 +755,14 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     // A held key is not a decision: one Enter, one message.
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229 || e.repeat) return
     e.preventDefault()
+    // A list on the chat's screen, and the field holds just the number of one of its options:
+    // Enter picks it. Nothing is sent as a message.
+    const chosen = menu && !pictures.length && /^[1-9]$/.test(input.value.trim()) ? Number(input.value.trim()) : 0
+    if (menu && chosen && chosen <= menu.options.length && !busy) {
+      input.value = ''
+      drafts.delete(target.key)
+      return void pick(chosen - 1)
+    }
     // Enter with nothing to send asks for the chat itself: Orca shows its tab beside this box
     // (as a click in the box does), and the field takes the keys back.
     if (!input.value.trim() && !pictures.length && !readOnly && !busy) return engage('enter')
@@ -843,6 +905,8 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     void loadPreview(target.key, true).then(
     (data) => {
       if (!open) return
+      menu = data.menu ?? null
+      showMenu()
       if (data.suggestion && !readOnly) {
         suggestion = data.suggestion
         offer()

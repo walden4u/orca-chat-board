@@ -1,4 +1,6 @@
 // Panel <-> worker contract, shared by src/worker.ts and panel/index.ts.
+import type { ScreenMenu } from './screen.ts'
+export type { ScreenMenu }
 
 export type AgentState = 'working' | 'blocked' | 'waiting' | 'done'
 
@@ -181,8 +183,22 @@ declare module 'orca' {
        * (`suggestion`) and, when Orca's record is behind the terminal, the screen itself.
        */
       input: { key: string; screen?: boolean }
-      output: { prompt: string | null; message: string | null; at: number | null; screen: string | null; suggestion: string | null }
+      output: {
+        prompt: string | null
+        message: string | null
+        at: number | null
+        screen: string | null
+        suggestion: string | null
+        /** A list to pick from that the terminal's screen shows right now (with `screen`), if any. */
+        menu: ScreenMenu | null
+      }
     }
+    /**
+     * Picks option `index` of the list on the chat's screen, by the keys you would press there.
+     * `label` is the option as the box showed it: when the screen no longer has it at that place,
+     * nothing is pressed (`changed`).
+     */
+    'menu.pick': { input: { key: string; index: number; label: string }; output: { ok: boolean; error: 'closed' | 'chat-tab' | 'changed' | string | null } }
     /** Turns the Workspace Board sync on or off (the same setting as in Orca's Settings). */
     'sync.set': { input: { on: boolean }; output: BoardView }
     /** Turns one of the plugin's on/off settings on or off (Orca's CLI cannot). */

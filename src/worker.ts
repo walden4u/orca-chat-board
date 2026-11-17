@@ -34,6 +34,7 @@ import {
   listWorkspaceStatuses,
   pasteIntoTerminal,
   pressEnter,
+  pressKeys,
   readTerminal,
   readTerminalScreen,
   renameChat,
@@ -50,7 +51,7 @@ import { newToken, openDoor, type OpenDoor, type RemoteDoor, type RemoteHandler 
 /** Storage key of the token a board on another machine must send; there once that board asked. */
 const REMOTE_TOKEN_KEY = 'remoteToken'
 import { readWorkspaceStatusNames } from './profile.ts'
-import { looksBusy, suggestionOf } from './screen.ts'
+import { keysFor, looksBusy, menuOf, suggestionOf, type ScreenMenu } from './screen.ts'
 import { applyWorkspaceStatuses, editSyncedColumns, moveWorkspaceCards } from './sync.ts'
 import { changedFiles, changesNote, clipDiff, draftReply, isKorean, judgeArgs, judgePrompt, readJudgeOutput, tailOf } from './judge.ts'
 import { folderIsHere, readTextFile, runTool } from './tools.ts'
@@ -652,7 +653,8 @@ export default function activate(orca: OrcaWorkerApi): void {
       message: null as string | null,
       at: null as number | null,
       screen: null as string | null,
-      suggestion: null as string | null
+      suggestion: null as string | null,
+      menu: null as ScreenMenu | null
     }
     try {
       // The reply box also asks for the terminals (their last output tells whether Orca's record is
@@ -663,7 +665,10 @@ export default function activate(orca: OrcaWorkerApi): void {
         screen ? listTerminals().catch(() => null) : null,
         handle ? readTerminal(handle).catch(() => null) : null
       ])
-      if (shown) found.suggestion = suggestionOf(shown.rows, shown.draft)
+      // A list the screen asks you to pick from (resume or start anew, a permission, a question):
+      // the box offers its options. What looks like a prompt on such a screen is the list's pointer.
+      if (shown) found.menu = menuOf(shown.rows)
+      if (shown && !found.menu) found.suggestion = suggestionOf(shown.rows, shown.draft)
       for (const w of agents) {
         for (const a of w.agents ?? []) {
           if (a.parentPaneKey || a.paneKey.split(':')[0] !== key) continue
@@ -725,6 +730,30 @@ export default function activate(orca: OrcaWorkerApi): void {
     } catch (err) {
       const reason = (err as Error).message.split('\n').pop() ?? ''
       orca.log(`send failed: ${reason}`)
+      return { ok: false, error: reason }
+    }
+  })
+
+  // Reply box: one option of the list on the chat's screen, picked by the keys you would press
+  // there. The screen is read again first: the keys go out only while that option is still there.
+  handle('menu.pick', async ({ key, index, label }) => {
+    if (refreshedAt === 0) await serial(refresh)
+    const handle = handles[key]
+    const card = (await loadBoard()).cards[key]
+    if (!handle || !card || card.closed) return { ok: false, error: 'closed' }
+    if (card.sessionId) return { ok: false, error: 'chat-tab' }
+    try {
+      const { terminals } = await listTerminals()
+      if (!terminals.some((t) => t.handle === handle && t.ptyId === card.ptyId)) return { ok: false, error: 'closed' }
+      const menu = menuOf((await readTerminal(handle)).rows)
+      const at = Number(index)
+      if (!menu || !Number.isInteger(at) || menu.options[at] === undefined || menu.options[at] !== label) return { ok: false, error: 'changed' }
+      for (const keys of keysFor(menu, at)) await pressKeys(handle, keys)
+      orca.log(`menu of "${card.label || card.title || key}": picked ${at + 1} of ${menu.options.length} ("${String(label).slice(0, 60)}")`)
+      return { ok: true, error: null }
+    } catch (err) {
+      const reason = (err as Error).message.split('\n').pop() ?? ''
+      orca.log(`menu pick failed: ${reason}`)
       return { ok: false, error: reason }
     }
   })
