@@ -35,6 +35,11 @@ export type ReplyTarget = {
    * double-click. Not when it follows another box: there a quick second click is you closing boxes.
    */
   fromCard: boolean
+  /**
+   * The box opened because the arrow keys came to its card (a setting). It takes the keyboard, and
+   * leaves Orca's tab alone until you click in it: on the way past, nothing should move but the box.
+   */
+  byArrows: boolean
   /** Checked chats that finished and wait behind this one. */
   waiting: number
 }
@@ -55,7 +60,15 @@ export type ReplyHandlers = {
   /** Used by the board on the server's own machine only (it has a click made there to get the keyboard back). */
   onKeys: (what: string) => void
   onClick: () => Promise<unknown>
+  /**
+   * An arrow key in a field that holds nothing you typed: on to the box of the card that way
+   * (columns, rows). Left out, the arrow keys are the field's own, as they always were.
+   */
+  onArrow?: (dx: number, dy: number) => void
 }
+
+const ARROWS: Record<string, [number, number] | undefined> = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }
+
 
 /**
  * On the server's machine, showing a chat switches Orca to its terminal tab, which takes the
@@ -659,6 +672,15 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // In a field you emptied, Tab brings back the reply drafted from the review, or else takes what
   // waits in the agent's own input (its suggestion for your next prompt), shown dimmed.
   input.onkeydown = (e) => {
+    // The arrow keys walk on to the next card's box while the field holds nothing of yours (empty,
+    // or the drafted reply as it was put there). A held key is one step, not a run of boxes.
+    const step = ARROWS[e.key]
+    const bare = !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && !e.isComposing && e.keyCode !== 229
+    if (step && handlers.onArrow && bare && !busy && (!input.value || input.value === filled)) {
+      e.preventDefault()
+      if (!e.repeat) handlers.onArrow(step[0], step[1])
+      return
+    }
     const again = draft ?? suggestion
     if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && again && !input.value && !readOnly) {
       e.preventDefault()
@@ -689,7 +711,10 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // On this board a box that opened by itself shows its chat at once too (asked for on
   // 2026-11-16): the chat that just finished is what you want to read. The keyboard is left
   // where the chat's tab puts it; a click in the box takes it.
-  engage(!target.auto)
+  // A box the arrow keys opened shows its chat only when you click in it: on the way past,
+  // nothing should move but the box.
+  if (target.byArrows) dialog.addEventListener('pointerdown', () => engage(), true)
+  else engage(!target.auto)
 
   const loadExchange = () =>
     void loadPreview(target.key, true).then(

@@ -84,6 +84,9 @@ const show = { agent: true, workspace: true, status: true, time: true, notes: tr
 let autoCheck = true
 /** The "Show the chat in Orca with its reply box" setting. */
 let followChat = false
+/** A setting: the arrow keys open the reply box of the card they go to, and walk on from box to box. */
+let arrowsOpenReply = false
+/** Setting: checked chats that wait for your answer are drawn pink, and so is the toolbar's edge. */
 /** Setting: checked chats that wait for your answer are drawn pink, and so is the toolbar's edge. */
 let pinkWaiting = false
 /**
@@ -119,6 +122,7 @@ async function loadSettings(): Promise<void> {
     show.preview = s.showPreview !== false
     autoCheck = s.autoCheck !== false
     followChat = s.followChat === true
+    arrowsOpenReply = s.arrowsOpenReply === true
     pinkWaiting = s.pinkWaiting === true
     goalMode = s.goalMode === true
     setLanguage(s.language)
@@ -323,7 +327,7 @@ function trace(message: string): void {
   void orca.plugin.request('trace', { message }).catch(() => undefined)
 }
 
-function showReply(c: CardView, how: 'click' | 'auto' | 'next' = 'click'): void {
+function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'click'): void {
   hidePreview()
   const kind = statusOf(c)
   const id = c.key.slice(0, 8)
@@ -353,10 +357,13 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' = 'click'): void 
       blocked: kind === 'blocked',
       auto: how === 'auto',
       fromCard: how === 'click',
+      byArrows: how === 'arrow',
       waiting: waitingCards(c.key).length
     },
     {
       // You are at this box: with the setting on, Orca shows that chat's tab beside it.
+      // With the setting on, the arrow keys go on from this box to the next card's.
+      onArrow: arrowsOpenReply ? walk : undefined,
       onEngaged: async () => {
         if (!followChat || c.closed) return false
         if (SHOWING_TAKES_KEYS) {
@@ -971,26 +978,52 @@ function onArrow(e: KeyboardEvent): void {
   if (!step || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing || replyKey() || editingCard) return
   const at = document.activeElement as HTMLElement | null
   if (at && at !== document.body && !at.classList.contains('card')) return
+  e.preventDefault()
+  walk(step[0], step[1])
+}
+
+/**
+ * The card one step from the one the keys are on; the first card to go to when they are on none;
+ * the card itself at an edge. `openOnly` steps over cards whose chat is closed (they have no reply box).
+ */
+function cardAt(dx: number, dy: number, openOnly: boolean): HTMLElement | null {
+  const at = document.activeElement
   const columns = [...document.querySelectorAll('.board .column')]
     .map((col) => [...col.querySelectorAll<HTMLElement>('.card')])
     .filter((cards) => cards.length)
-  if (!columns.length) return
-  let x = columns.findIndex((cards) => cards.some((c) => c === at || c.dataset.key === pickedKey))
-  let target: HTMLElement
-  if (x < 0) {
-    target = document.querySelector<HTMLElement>('.board .card.answer-due') ?? columns[0][0]
-  } else {
-    const y = columns[x].findIndex((c) => c === at || c.dataset.key === pickedKey)
-    x = Math.min(columns.length - 1, Math.max(0, x + step[0]))
-    target = columns[x][Math.min(columns[x].length - 1, Math.max(0, y + step[1]))]
+  if (!columns.length) return null
+  const on = (c: HTMLElement) => c === at || c.dataset.key === pickedKey
+  let x = columns.findIndex((cards) => cards.some(on))
+  if (x < 0) return document.querySelector<HTMLElement>('.board .card.answer-due') ?? columns[0][0]
+  let y = columns[x].findIndex(on)
+  const from = columns[x][y]
+  for (;;) {
+    const nx = Math.min(columns.length - 1, Math.max(0, x + dx))
+    const ny = Math.min(columns[nx].length - 1, Math.max(0, y + dy))
+    const target = columns[nx][ny]
+    const closed = view?.cards.find((c) => c.key === target.dataset.key)?.closed === true
+    if (!openOnly || !closed) return target
+    // Nothing but closed chats that way: the keys stay where they are.
+    if (nx === x && ny === y) return from
+    x = nx
+    y = ny
   }
-  e.preventDefault()
+}
+
+/** One step of the arrow keys, from the board or (with the setting on) from an open reply box. */
+function walk(dx: number, dy: number): void {
+  const box = replyKey()
+  // A box that opened by itself, or from a click: the keys go on from its card.
+  if (box) pickedKey = box
+  const target = cardAt(dx, dy, arrowsOpenReply)
+  if (!target || (box && target.dataset.key === box)) return
   pickedKey = target.dataset.key ?? null
-  target.focus()
+  if (!box) target.focus()
   target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  // The card the keys are on shows what a hover would: your last prompt and the agent's reply.
-  // (Showing the chat itself at every step would take the keys away from the board.)
   const picked = view?.cards.find((c) => c.key === pickedKey)
+  if (arrowsOpenReply && picked && !picked.closed) return showReply(picked, 'arrow')
+  // The card the keys are on shows what a hover would: your last prompt and the agent's reply.
+  // (Showing its terminal instead would hand Orca's keyboard to that terminal at every step.)
   if (picked && show.preview && !picked.closed) schedulePreview(picked.key, target, true)
   else hidePreview()
 }
