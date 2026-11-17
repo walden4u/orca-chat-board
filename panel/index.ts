@@ -358,6 +358,7 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       auto: how === 'auto',
       fromCard: how === 'click',
       byArrows: how === 'arrow',
+      watched: c.watch === true,
       waiting: waitingCards(c.key).length
     },
     {
@@ -396,6 +397,13 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       onNext: () => {
         trace(`reply left ${id}: next`)
         openNextWaiting(true)
+      },
+      onFinish: () => {
+        trace(`reply left ${id}: finished, unchecked`)
+        void setWatch(c, false).then(() => {
+          openNextWaiting(true)
+          setTimeout(keepPicked, 0)
+        })
       },
       onClosed: () => {
         trace(`reply left ${id}: closed`)

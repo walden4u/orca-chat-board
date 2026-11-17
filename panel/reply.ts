@@ -40,6 +40,8 @@ export type ReplyTarget = {
    * leaves Orca's tab alone until you click in it: on the way past, nothing should move but the box.
    */
   byArrows: boolean
+  /** The chat is checked: the box has its Finish button, which unchecks it. */
+  watched: boolean
   /** Checked chats that finished and wait behind this one. */
   waiting: number
 }
@@ -50,6 +52,8 @@ export type ReplyHandlers = {
   onOpenChat: () => void
   /** Read, not answered: on to the next waiting chat. */
   onNext: () => void
+  /** You are done with this chat: it is unchecked, and the box is closed. */
+  onFinish: () => void
   /** Closed by hand (✕, Escape, a click outside). */
   onClosed: () => void
   /**
@@ -295,6 +299,10 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   status.setAttribute('role', 'status')
   const next = node('button', 'ghost reply-next', t.next)
   next.title = t.nextHint
+  // Done with a checked chat: one press unchecks it, so it no longer waits or comes round with the arrow keys.
+  const finish = node('button', 'ghost reply-next', t.finish)
+  tip(finish, t.finishHint)
+  finish.hidden = !target.watched
   // Goal mode: split what is in the field into a checklist (GOAL.md), run that checklist to its
   // end (`/goal`), and have the work reviewed. Each is one prompt to the agent, or one review.
   const split = node('button', 'ghost reply-next', t.goalSplit)
@@ -309,7 +317,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   const send = node('button', 'primary', t.send)
   send.disabled = readOnly
   const row = node('div', 'reply-row')
-  row.append(split, run, review, status, next, send)
+  row.append(split, run, review, finish, status, next, send)
   foot.append(shelf, input, row)
 
   dialog.append(head, body, foot)
@@ -610,6 +618,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   shut.onclick = () => leave(handlers.onClosed)
   toChat.onclick = () => leave(handlers.onOpenChat)
   next.onclick = () => leave(handlers.onNext)
+  finish.onclick = () => leave(handlers.onFinish)
   send.onclick = () => void submit()
   // Split: the goal you typed goes to the agent as a request to write it down as a checklist with
   // a way to check each item, and to build nothing yet. You read the file before anything runs.
