@@ -134,9 +134,28 @@ export default function activate(orca: OrcaWorkerApi): void {
     return mine.result
   }
 
+  /** Chats are shown one at a time (each takes two seconds or more here), and of those that wait only the last. */
+  let lastAsked = 0
+  let showTurn: Promise<void> = Promise.resolve()
+
   async function showHere(key: string): Promise<Shown | null> {
     const place = placeOf[key]
     if (!place || !place.worktreeId) return null
+    const mine = ++lastAsked
+    const before = showTurn
+    let done = (): void => undefined
+    showTurn = new Promise<void>((free) => (done = free))
+    await before
+    try {
+      // Another chat was asked for while this one waited: this one is passed over.
+      if (mine !== lastAsked) return { ok: false, error: null }
+      return await showNow(key, place)
+    } finally {
+      done()
+    }
+  }
+
+  async function showNow(key: string, place: Place): Promise<Shown | null> {
     let answer: string
     try {
       // A card's key is its tab's id on the server, which the web client's tabs carry too.
@@ -178,6 +197,10 @@ export default function activate(orca: OrcaWorkerApi): void {
     }) as never)
   }
 
+  // What the reply boxes here did with the keyboard is also written in the server's log (as
+  // 'panel: remote: …'): whoever looks into a trouble sits at the server, not at this machine.
+  const tellServer = (line: string): void => void ask('trace', { message: `remote: ${line}`.slice(0, 200) }).catch(() => undefined)
+
   // The mouse of this machine, for this machine's reply boxes (see keys.ts). Answered here and
   // never passed on: the server's mouse belongs to whoever sits there.
   const KEYS_SPOT_KEY = 'keysSpot'
@@ -193,7 +216,11 @@ export default function activate(orca: OrcaWorkerApi): void {
     if (ranOut && keysWhy() === 'cancelled') return { ok }
     if (ranOut && Date.now() - ranOutLoggedAt < 60_000) return { ok }
     if (ranOut) ranOutLoggedAt = Date.now()
-    if (op !== 'warm' && op !== 'cancel' && (op !== 'mark' || !ok)) orca.log(`mouse for the reply box, ${op}: ${ok ? 'done' : `not done (${keysWhy()})`}`)
+    if (op !== 'warm' && op !== 'cancel' && (op !== 'mark' || !ok)) {
+      const line = `mouse for the reply box, ${op}: ${ok ? 'done' : `not done (${keysWhy()})`}`
+      orca.log(line)
+      tellServer(line)
+    }
     return { ok }
   }) as never)
 
@@ -202,6 +229,7 @@ export default function activate(orca: OrcaWorkerApi): void {
 
   orca.panels.handle('trace' as never, ((input: { message?: unknown } | null) => {
     orca.log(`panel: ${String(input?.message).slice(0, 200)}`)
+    tellServer(String(input?.message))
   }) as never)
 
   /** A board that came from the server by any way: the panel gets it when it differs from what it has. */

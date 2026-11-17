@@ -51,8 +51,12 @@ export type ReplyTarget = {
  * its empty field ('enter'), or the arrow keys brought you to it and you stayed ('stay').
  */
 export type Engaged = 'open' | 'enter' | 'stay'
-/** How long the arrow keys rest on a chat before its tab is shown beside the box. */
-const STAY_MS = 1000
+/**
+ * How long the arrow keys rest on a chat before its tab is shown beside the box. Tried at 1 s (too
+ * long a wait) and at 0 (2026-11-17: every chat passed on the way was shown, one after the other,
+ * and the keyboard was away for 7 s after five quick steps on the board of another machine).
+ */
+const STAY_MS = 400
 
 export type ReplyHandlers = {
   onSent: (title: string) => void
@@ -766,9 +770,13 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // the keyboard have been still for a moment (and gives up after some seconds). With the
   // pointer somewhere else, it is first put on the spot of your last click in this panel, and
   // put back afterwards; the click is made only once the sheet has felt the pointer arrive.
-  const takeBack = async (whenStill = false) => {
+  // `force`: right after Orca was asked to show the chat. The keys are then taken to be gone
+  // whatever this frame believes: a chat shown in a browser tab (the board of another machine)
+  // takes them without this frame ever hearing of it (seen 2026-11-17: "kept", and they were not).
+  const takeBack = async (whenStill = false, force = false) => {
     if (!open || readOnly || busy || taking) return
-    if (hasKeys()) return handlers.onKeys('kept')
+    const have = () => !force && hasKeys()
+    if (have()) return handlers.onKeys('kept')
     taking = true
     let brought = false
     let clicked = false
@@ -798,7 +806,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
         // One wait of the worker is short (a request has 30 s); the box goes on asking while it
         // is open and the keys are elsewhere, for as long as you may reasonably be away.
         const until = Date.now() + 30 * 60_000
-        while (open && !brought && !hasKeys() && !stopped && Date.now() < until) {
+        while (open && !brought && !have() && !stopped && Date.now() < until) {
           const asked = Date.now()
           brought = await mouse('move')
           // Refused at once (no spot remembered yet, no helper): not asked again in a hurry.
@@ -809,7 +817,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
           await pause(150)
           // The panel felt the pointer arrive, or the spot is no longer on it: then no click.
           if (!pointerIn) what = 'with the terminal, the pointer did not land on the panel'
-          else if (open && !hasKeys()) await click('click')
+          else if (open && !have()) await click('click')
         }
       }
       if (hasKeys()) what = clicked ? 'back by a click' : 'kept'
@@ -858,7 +866,10 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     void handlers.onEngaged(how).then((moved) => {
       // A box that opened by itself leaves the keys alone until you are not typing (see `takeBack`).
       if (!target.auto && open && !readOnly && !busy && document.activeElement !== input) input.focus()
-      if (moved) setTimeout(() => void takeBack(target.auto && how === 'open'), 150)
+      if (moved) setTimeout(() => void takeBack(target.auto && how === 'open', true), 150)
+      // The keys can leave again in the moments after (a chat shown just before this one arrives
+      // late, or the tab takes them once it is drawn): looked at a few times more.
+      if (moved) for (const ms of [700, 1500, 3000]) setTimeout(() => void (open && !hasKeys() && takeBack(target.auto && how === 'open')), ms)
     })
   }
   // On this board a box that opened by itself shows its chat at once too (asked for on
