@@ -364,15 +364,16 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       // You are at this box: with the setting on, Orca shows that chat's tab beside it.
       // With the setting on, the arrow keys go on from this box to the next card's.
       onArrow: arrowsOpenReply ? walk : undefined,
-      onEngaged: async () => {
-        if (!followChat || c.closed) return false
+      onEngaged: async (asked = false) => {
+        // Asked for with Enter in an empty field: shown whatever the setting says.
+        if ((!followChat && !asked) || c.closed) return false
         if (SHOWING_TAKES_KEYS) {
           // Already the tab on screen: nothing to show, and asking Orca to show it would hand the
           // keys to its terminal, which this box cannot get back without a click.
           if (view?.cards.find((x) => x.key === c.key)?.active) return false
           // Opened with the keyboard, the pointer somewhere else: no click could bring the keys
           // back from the terminal, so the tab is left as it is and the keys stay in the box.
-          if (!pointerOverPanel()) return false
+          if (!asked && !pointerOverPanel()) return false
           void orca.plugin.request('keys.click', { warm: true }).catch(() => null)
         }
         const r = await orca.plugin.request('chat.focus', { key: c.key }).catch(() => null)

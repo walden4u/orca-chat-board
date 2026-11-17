@@ -56,7 +56,7 @@ export type ReplyHandlers = {
    * You are at this box: at once for one you opened, at your first click for one that opened by
    * itself. Orca may move the keyboard while it answers; the field takes it back afterwards.
    */
-  onEngaged: () => Promise<unknown>
+  onEngaged: (asked?: boolean) => Promise<unknown>
   /** Used by the board on the server's own machine only (it has a click made there to get the keyboard back). */
   onKeys: (what: string) => void
   onClick: () => Promise<unknown>
@@ -693,6 +693,8 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     // A held key is not a decision: one Enter, one message.
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229 || e.repeat) return
     e.preventDefault()
+    // Enter with nothing to send asks for the chat itself, as a click in the box does.
+    if (!input.value.trim() && !pictures.length && !readOnly && !busy) return engage(true, true)
     void submit()
   }
   document.addEventListener('keydown', onKey, true)
@@ -701,10 +703,11 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   document.body.append(backdrop)
   if (!readOnly && !target.auto) setTimeout(() => input.focus(), 0)
   let engaged = false
-  const engage = (takeKeyboard = true) => {
-    if (engaged) return
+  // `asked`: you pressed Enter for it, so it is done again.
+  const engage = (takeKeyboard = true, asked = false) => {
+    if (engaged && !asked) return
     engaged = true
-    void handlers.onEngaged().then(() => {
+    void handlers.onEngaged(asked).then(() => {
       if (takeKeyboard && open && !readOnly && !busy && document.activeElement !== input) input.focus()
     })
   }
