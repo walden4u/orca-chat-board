@@ -370,6 +370,7 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' = 'click'): void 
         showFlash(t.sent(title), true)
         stayAlert()
         openNextWaiting(true)
+        setTimeout(keepPicked, 0)
       },
       // Closing a box is done with that chat, not with the queue: the next one that waits opens.
       onNext: () => {
@@ -379,6 +380,7 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' = 'click'): void 
       onClosed: () => {
         trace(`reply left ${id}: closed`)
         openNextWaiting(true)
+        setTimeout(keepPicked, 0)
       },
       onOpenChat: () => {
         trace(`reply left ${id}: to the chat, queue held`)
@@ -924,6 +926,51 @@ function render(force = false): void {
   if (toolbar.parentNode !== root) root.replaceChildren(toolbar)
   while (root.lastChild && root.lastChild !== toolbar) root.lastChild.remove()
   root.append(...children)
+  keepPicked()
+}
+
+// ---------- arrow keys ----------
+
+/** The card the arrow keys are on. Redrawing replaces every card, so the keys go back to it by name. */
+let pickedKey: string | null = null
+
+/** After a redraw, or when a reply box closes: the keys return to the picked card, unless they are somewhere of their own. */
+function keepPicked(): void {
+  if (!pickedKey || replyKey()) return
+  const at = document.activeElement
+  if (at && at !== document.body && !at.classList.contains('card')) return
+  const card = [...document.querySelectorAll<HTMLElement>('.board .card')].find((c) => c.dataset.key === pickedKey)
+  if (!card) pickedKey = null
+  else if (at !== card) card.focus({ preventScroll: true })
+}
+
+/**
+ * Arrow keys walk the board's cards (up and down in a column, left and right between columns that
+ * have cards); Enter on a card opens its reply box, as the card itself already does. The first
+ * arrow goes to the first chat that waits for your answer, or the first card.
+ */
+function onArrow(e: KeyboardEvent): void {
+  const step = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key]
+  if (!step || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing || replyKey() || editingCard) return
+  const at = document.activeElement as HTMLElement | null
+  if (at && at !== document.body && !at.classList.contains('card')) return
+  const columns = [...document.querySelectorAll('.board .column')]
+    .map((col) => [...col.querySelectorAll<HTMLElement>('.card')])
+    .filter((cards) => cards.length)
+  if (!columns.length) return
+  let x = columns.findIndex((cards) => cards.some((c) => c === at || c.dataset.key === pickedKey))
+  let target: HTMLElement
+  if (x < 0) {
+    target = document.querySelector<HTMLElement>('.board .card.answer-due') ?? columns[0][0]
+  } else {
+    const y = columns[x].findIndex((c) => c === at || c.dataset.key === pickedKey)
+    x = Math.min(columns.length - 1, Math.max(0, x + step[0]))
+    target = columns[x][Math.min(columns[x].length - 1, Math.max(0, y + step[1]))]
+  }
+  e.preventDefault()
+  pickedKey = target.dataset.key ?? null
+  target.focus()
+  target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
 }
 
 // ---------- boot ----------
@@ -937,6 +984,12 @@ function boot(): void {
   app.style.cssText = 'display:flex;flex-direction:column;height:100%;min-height:0'
   document.body.append(app)
   document.addEventListener('focusout', () => setTimeout(() => pendingRender && render(), 0))
+  document.addEventListener('keydown', onArrow)
+  // A card you clicked or tabbed to is where the arrow keys go on from.
+  document.addEventListener('focusin', (e) => {
+    const card = (e.target as Element).closest?.('.board .card') as HTMLElement | null
+    if (card?.dataset.key && e.target === card) pickedKey = card.dataset.key
+  })
   // While a button of the board is held down, redraws wait: the click belongs to the button that
   // was pressed, and a new one in its place would never get it.
   document.addEventListener('pointerdown', (e) => {

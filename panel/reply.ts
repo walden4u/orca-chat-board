@@ -374,7 +374,9 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   let open = true
   let busy = false
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape' && !e.isComposing && !busy) leave(handlers.onClosed)
+    // Also in the middle of a Korean syllable: there the key arrives as `Process`, and only `code`
+    // says it was Escape. What you typed is kept for this chat either way.
+    if ((e.key === 'Escape' || e.code === 'Escape') && !busy) leave(handlers.onClosed)
   }
   // Pictures: pasted or dropped here, handed to the worker in pieces, attached to the prompt on Send.
   type Picture = { id: string; url: string; ready: boolean; thumb: HTMLElement }
