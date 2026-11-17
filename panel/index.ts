@@ -7,7 +7,7 @@ import { STATUS_ICON, type StatusKind } from './icons.ts'
 import { locale, setLanguage, t } from './i18n.ts'
 import { isStale } from '../src/monitor.ts'
 import { hidePreview, schedulePreview } from './preview.ts'
-import { closeReply, openReply, replyKey, setReplyChat, setReplyJudge, setReplyWaiting } from './reply.ts'
+import { SHOWING_TAKES_KEYS, closeReply, openReply, pointerOverPanel, replyKey, setReplyChat, setReplyJudge, setReplyWaiting } from './reply.ts'
 
 const INTERRUPTED = new Set(['interruption', 'failure', 'cancellation'])
 
@@ -358,13 +358,25 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' = 'click'): void 
     {
       // You are at this box: with the setting on, Orca shows that chat's tab beside it.
       onEngaged: async () => {
-        if (!followChat || c.closed) return
+        if (!followChat || c.closed) return false
+        if (SHOWING_TAKES_KEYS) {
+          // Already the tab on screen: nothing to show, and asking Orca to show it would hand the
+          // keys to its terminal, which this box cannot get back without a click.
+          if (view?.cards.find((x) => x.key === c.key)?.active) return false
+          // Opened with the keyboard, the pointer somewhere else: no click could bring the keys
+          // back from the terminal, so the tab is left as it is and the keys stay in the box.
+          if (!pointerOverPanel()) return false
+          void orca.plugin.request('keys.click', { warm: true }).catch(() => null)
+        }
         const r = await orca.plugin.request('chat.focus', { key: c.key }).catch(() => null)
         if (r?.ok && view && r.error !== 'chat-workspace') {
           for (const x of view.cards) x.active = x.key === c.key
           render()
         }
+        return true
       },
+      onKeys: (what) => trace(`reply keys ${id}: ${what}`),
+      onClick: () => orca.plugin.request('keys.click', {}).catch(() => null),
       onSent: (title) => {
         trace(`reply left ${id}: sent`)
         showFlash(t.sent(title), true)

@@ -51,7 +51,22 @@ export type ReplyHandlers = {
    * You are at this box: at once for one you opened, at your first click for one that opened by
    * itself. Orca may move the keyboard while it answers; the field takes it back afterwards.
    */
-  onEngaged: () => Promise<void>
+  onEngaged: () => Promise<unknown>
+  /** Used by the board on the server's own machine only (it has a click made there to get the keyboard back). */
+  onKeys: (what: string) => void
+  onClick: () => Promise<unknown>
+}
+
+/**
+ * On the server's machine, showing a chat switches Orca to its terminal tab, which takes the
+ * keyboard from the panel; the board there works around that. Here the chat is shown in a browser
+ * tab: nothing to work around.
+ */
+export const SHOWING_TAKES_KEYS = false
+
+/** Only asked on the server's machine. */
+export function pointerOverPanel(): boolean {
+  return true
 }
 
 const PICTURE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
