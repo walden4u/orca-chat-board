@@ -1,6 +1,6 @@
 // What an agent's screen says: the lists it asks you to pick from.
 import { assert, test } from 'orca/testing'
-import { keysFor, menuOf } from './screen.ts'
+import { keysFor, looksBusy, menuOf } from './screen.ts'
 
 // Screens as `orca terminal read --screen` gave them (Claude Code 2.1.327, 2026-11-18).
 const RESUME = [
@@ -90,6 +90,10 @@ test('a permission request, with no word about Enter under it and an option on t
   ])
   assert.equal(menu?.question, 'Bash command\nperm-check 디렉터리 생성\n\nmkdir perm-check\n\nDo you want to proceed?')
   assert.deepEqual(keysFor(menu!, 3), ['4'])
+  // Its "Esc to cancel" is not a running turn's "esc to cancel" (seen 2026-11-18: the card went
+  // from waiting to working and back every second).
+  assert.equal(looksBusy(PERMISSION), false)
+  assert.equal(looksBusy(['✽ Wrangling… (12s · ↓ 1k tokens)', '  esc to cancel']), true)
 })
 
 test('a list without numbers is picked with the arrows and Enter', () => {

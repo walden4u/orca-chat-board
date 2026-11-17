@@ -141,6 +141,8 @@ export function keysFor(menu: ScreenMenu, index: number): string[] {
  * alone cannot tell you typing from the agent working.
  */
 export function looksBusy(rows: readonly string[]): boolean {
+  // A list waiting for your pick says "Esc to cancel" too (a permission request): that is no work.
+  if (menuOf(rows)) return false
   return rows
     .slice(-30)
     // The spinner line starts with the spinner's glyph, never with a prompt mark: that is your own line.
