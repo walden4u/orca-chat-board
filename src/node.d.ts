@@ -12,8 +12,13 @@ declare module 'node:child_process' {
       windowsVerbatimArguments?: boolean
     },
     callback: (error: (Error & { code?: unknown }) | null, stdout: string, stderr: string) => void
-  ): { stdin?: { end(data?: string): void } | null }
+  ): {
+    stdin?: { end(data?: string): void; write(data: string): boolean } | null
+    stdout?: { on(event: 'data', listener: (chunk: string) => void): unknown } | null
+  }
 }
+
+declare function btoa(data: string): string
 
 declare module 'node:fs' {
   export function existsSync(path: string): boolean
@@ -26,7 +31,41 @@ declare module 'node:fs' {
   export function unlinkSync(path: string): void
 }
 
-declare var Buffer: { from(data: string, encoding: 'base64'): Uint8Array }
+declare var Buffer: {
+  from(data: string, encoding: 'base64' | 'utf8'): Uint8Array
+  concat(list: Uint8Array[]): Uint8Array & { toString(encoding: 'utf8'): string }
+}
+
+declare module 'node:crypto' {
+  export function randomBytes(size: number): { toString(encoding: 'hex'): string }
+  export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean
+}
+
+declare module 'node:os' {
+  export function networkInterfaces(): Record<string, { address: string; family: string; internal: boolean }[] | undefined>
+}
+
+declare module 'node:http' {
+  type Incoming = {
+    method?: string
+    url?: string
+    headers: { authorization?: string }
+    on(event: 'data', listener: (chunk: Uint8Array) => void): void
+    on(event: 'end' | 'close', listener: () => void): void
+    destroy(): void
+  }
+  type Outgoing = { writeHead(status: number, headers: Record<string, string>): void; write(text: string): void; end(body?: string): void }
+  type Server = {
+    close(): void
+    closeAllConnections(): void
+    listen(port: number, host: string): void
+    on(event: 'error', listener: (err: Error & { code?: string }) => void): void
+    on(event: 'listening', listener: () => void): void
+    address(): { port: number }
+    unref(): void
+  }
+  export function createServer(listener: (req: Incoming, res: Outgoing) => void): Server
+}
 
 declare module 'node:sqlite' {
   export class DatabaseSync {

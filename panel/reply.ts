@@ -60,10 +60,9 @@ export type ReplyHandlers = {
    * You are at this box: at once for one you opened, at your first click for one that opened by
    * itself. Orca may move the keyboard while it answers; the field takes it back afterwards.
    */
-  onEngaged: (asked?: boolean) => Promise<unknown>
-  /** Used by the board on the server's own machine only (it has a click made there to get the keyboard back). */
+  onEngaged: (asked?: boolean) => Promise<boolean>
+  /** After Orca was asked to show the chat: where the keyboard ended up, for the log. */
   onKeys: (what: string) => void
-  onClick: () => Promise<unknown>
   /**
    * An arrow key in a field that holds nothing you typed: on to the box of the card that way
    * (columns, rows). Left out, the arrow keys are the field's own, as they always were.
@@ -74,16 +73,41 @@ export type ReplyHandlers = {
 const ARROWS: Record<string, [number, number] | undefined> = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }
 
 
-/**
- * On the server's machine, showing a chat switches Orca to its terminal tab, which takes the
- * keyboard from the panel; the board there works around that. Here the chat is shown in a browser
- * tab: nothing to work around.
- */
-export const SHOWING_TAKES_KEYS = false
+/** A step of the mouse made for you (see `takeBack`): `KeysOp` of the worker's keys.ts. */
+export type MouseOp = 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'restore' | 'cancel'
+let mouse: (op: MouseOp) => Promise<boolean> = async () => false
+/** The board gives the reply boxes their way to the mouse. */
+export function setReplyMouse(next: (op: MouseOp) => Promise<boolean>): void {
+  mouse = next
+}
 
-/** Only asked on the server's machine. */
+/** Whether the pointer is over this frame: a click made where it is must land here. */
+let pointerIn = false
+document.addEventListener('pointermove', () => (pointerIn = true), true)
+let markedAt = 0
+document.addEventListener(
+  'pointerdown',
+  (e) => {
+    pointerIn = true
+    // Where you click in this panel is where a click can be made for you later (see `takeBack`).
+    if (!SHOWING_TAKES_KEYS || !e.isTrusted || Date.now() - markedAt < 2000) return
+    markedAt = Date.now()
+    void mouse('mark')
+  },
+  true
+)
+document.documentElement.addEventListener('mouseleave', () => (pointerIn = false))
+
+/**
+ * Showing a chat here means this machine's Orca goes to the browser tab with the server's web
+ * screen, and the keyboard goes there with it. The reply box gets it back the way the server's
+ * own board does: by a click made for you (this machine's worker, this machine's mouse).
+ */
+export const SHOWING_TAKES_KEYS = true
+
+/** Whether a click made where the pointer is would land on this panel. */
 export function pointerOverPanel(): boolean {
-  return true
+  return pointerIn
 }
 
 const PICTURE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
@@ -523,6 +547,12 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     if (document.visibilityState !== 'visible') return
     setTimeout(() => {
       if (open && !readOnly && !busy && document.activeElement !== input) input.focus()
+      // Orca gave the keys back to this panel by itself (it had them when you left): the mouse
+      // that was waiting for you to come back has nothing left to do, and must not move.
+      if (open && taking && hasKeys()) {
+        stopped = true
+        void mouse('cancel')
+      }
     }, 0)
   }
   window.addEventListener('focus', onShown)
@@ -538,6 +568,10 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     if (input.value.trim() && input.value !== filled) drafts.set(target.key, input.value)
     else drafts.delete(target.key)
     document.removeEventListener('keydown', onKey, true)
+    if (taking) {
+      stopped = true
+      void mouse('cancel')
+    }
     backdrop.remove()
     current = null
   }
@@ -703,7 +737,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229 || e.repeat) return
     e.preventDefault()
     // Enter with nothing to send asks for the chat itself, as a click in the box does.
-    if (!input.value.trim() && !pictures.length && !readOnly && !busy) return engage(true, true)
+    if (!input.value.trim() && !pictures.length && !readOnly && !busy) return engage(true)
     void submit()
   }
   document.addEventListener('keydown', onKey, true)
@@ -711,22 +745,121 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   showJudge(target.judge, target.tally)
   document.body.append(backdrop)
   if (!readOnly && !target.auto) setTimeout(() => input.focus(), 0)
+  // Orca showed the chat's tab and gave its terminal the keys. This frame cannot have them back
+  // by asking (tried for 3 s after a click: never), only by a click in it. So one is made for
+  // you where the pointer already is, over this box, and a sheet over the box takes it, so that
+  // it presses none of the buttons.
+  const hasKeys = () => document.activeElement === input && document.hasFocus()
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  let taking = false
+  let stopped = false
+  // `whenStill`: for a box that opened by itself. You may be typing in a terminal just then, and
+  // keys taken in the middle of a word would end up in this box, so the mouse waits until it and
+  // the keyboard have been still for a moment (and gives up after some seconds). With the
+  // pointer somewhere else, it is first put on the spot of your last click in this panel, and
+  // put back afterwards; the click is made only once the sheet has felt the pointer arrive.
+  const takeBack = async (whenStill = false) => {
+    if (!open || readOnly || busy || taking) return
+    if (hasKeys()) return handlers.onKeys('kept')
+    taking = true
+    let brought = false
+    let clicked = false
+    let what = 'with the terminal, no click came'
+    stopped = false
+    // The sheet is there only for the moment of the click: while the mouse waits for you (which
+    // may be minutes, with the pointer elsewhere) the box stays as it is.
+    const click = async (op: MouseOp) => {
+      const sheet = node('div', 'reply-sheet')
+      sheet.addEventListener('click', () => {
+        clicked = true
+        sheet.remove()
+        if (open) input.focus()
+      })
+      document.body.append(sheet)
+      try {
+        await mouse(op)
+        await pause(250)
+      } finally {
+        sheet.remove()
+      }
+    }
+    try {
+      if (pointerIn) {
+        await click(whenStill ? 'click-idle' : 'click')
+      } else {
+        // One wait of the worker is short (a request has 30 s); the box goes on asking while it
+        // is open and the keys are elsewhere, for as long as you may reasonably be away.
+        const until = Date.now() + 30 * 60_000
+        while (open && !brought && !hasKeys() && !stopped && Date.now() < until) {
+          const asked = Date.now()
+          brought = await mouse('move')
+          // Refused at once (no spot remembered yet, no helper): not asked again in a hurry.
+          if (!brought && Date.now() - asked < 2000) await pause(3000)
+        }
+        if (!brought) what = hasKeys() ? 'back by your own click' : 'with the terminal, pointer elsewhere and not brought here'
+        else {
+          await pause(150)
+          // The panel felt the pointer arrive, or the spot is no longer on it: then no click.
+          if (!pointerIn) what = 'with the terminal, the pointer did not land on the panel'
+          else if (open && !hasKeys()) await click('click')
+        }
+      }
+      if (hasKeys()) what = clicked ? 'back by a click' : 'kept'
+      else if (clicked) what = 'clicked, still with the terminal'
+    } finally {
+      taking = false
+      if (brought) void mouse('restore')
+      if (open) handlers.onKeys(what)
+    }
+  }
+  // You clicked in the box yourself while the mouse was waiting for you: it has nothing left to do.
+  dialog.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (!taking || !e.isTrusted) return
+      stopped = true
+      void mouse('cancel')
+    },
+    true
+  )
+  // A box that opened by itself takes the keys too: at once when this panel has them anyway,
+  // and otherwise by that click, once you are not typing.
+  if (!readOnly && target.auto) {
+    setTimeout(() => {
+      if (!open) return
+      const seen = [document.hasFocus() ? 'T' : 'F']
+      if (document.hasFocus()) input.focus()
+      else if (SHOWING_TAKES_KEYS) void takeBack(true)
+      // The keys may leave in the moments after (seen 2026-11-17: this panel had them when the
+      // box opened, and you found them in the terminal): looked at again a few times.
+      for (const ms of [300, 1000, 2000, 4000]) {
+        setTimeout(() => {
+          if (!open) return
+          seen.push(hasKeys() ? 'T' : 'F')
+          if (!hasKeys() && SHOWING_TAKES_KEYS) void takeBack(true)
+          if (ms === 4000) handlers.onKeys(`opened by itself, panel had the keys at 0, 0.3, 1, 2, 4 s: ${seen.join(' ')}`)
+        }, ms)
+      }
+    }, 0)
+  }
   let engaged = false
-  // `asked`: you pressed Enter for it, so it is done again.
-  const engage = (takeKeyboard = true, asked = false) => {
+  // `asked`: you pressed Enter for it, so it is done again, and with the pointer anywhere.
+  const engage = (asked = false) => {
     if (engaged && !asked) return
     engaged = true
-    void handlers.onEngaged(asked).then(() => {
-      if (takeKeyboard && open && !readOnly && !busy && document.activeElement !== input) input.focus()
+    void handlers.onEngaged(asked).then((moved) => {
+      // A box that opened by itself leaves the keys alone until you are not typing (see `takeBack`).
+      if (!target.auto && open && !readOnly && !busy && document.activeElement !== input) input.focus()
+      if (moved) setTimeout(() => void takeBack(target.auto && !asked), 150)
     })
   }
   // On this board a box that opened by itself shows its chat at once too (asked for on
-  // 2026-11-16): the chat that just finished is what you want to read. The keyboard is left
-  // where the chat's tab puts it; a click in the box takes it.
+  // 2026-11-16): the chat that just finished is what you want to read. The keyboard goes to
+  // the chat's tab with it, and comes back to this box by the click made for you.
   // A box the arrow keys opened shows its chat only when you click in it: on the way past,
   // nothing should move but the box.
   if (target.byArrows) dialog.addEventListener('pointerdown', () => engage(), true)
-  else engage(!target.auto)
+  else engage()
 
   const loadExchange = () =>
     void loadPreview(target.key, true).then(

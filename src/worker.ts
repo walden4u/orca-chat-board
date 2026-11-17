@@ -7,6 +7,7 @@ import { orcaEnvironment, setOrcaEnvironment, type RemoteTrouble } from './cli.t
 import { askServer, forgetDoor, isDirect, isListening, keepListening, onServerEvent } from './direct.ts'
 import { unseenHere, type SeenCard } from './unseen.ts'
 import { forgetWebTab, showChatInWebTab } from './webtab.ts'
+import { keys, keysWhy, markedSpot, setMarkedSpot, type KeysOp } from './keys.ts'
 
 /** The Chat Board on the server: a development plugin, which is what `plugin dev request` can call. */
 const TARGET = 'local.chat-board'
@@ -176,6 +177,25 @@ export default function activate(orca: OrcaWorkerApi): void {
       return result
     }) as never)
   }
+
+  // The mouse of this machine, for this machine's reply boxes (see keys.ts). Answered here and
+  // never passed on: the server's mouse belongs to whoever sits there.
+  const KEYS_SPOT_KEY = 'keysSpot'
+  let ranOutLoggedAt = 0
+  void orca.storage.get(KEYS_SPOT_KEY as never).then(setMarkedSpot).catch(() => undefined)
+  orca.panels.handle('keys.click' as never, (async (input: { op?: KeysOp } | null) => {
+    const op = input?.op
+    if (!op) return { ok: false }
+    const ok = await keys(op)
+    if (op === 'mark' && ok) void orca.storage.set(KEYS_SPOT_KEY as never, markedSpot() as never).catch(() => undefined)
+    // Not each wait that ran out (a box goes on asking for as long as you are away): one a minute.
+    const ranOut = op === 'move' && !ok && /^(given up|cancelled)/.test(keysWhy())
+    if (ranOut && keysWhy() === 'cancelled') return { ok }
+    if (ranOut && Date.now() - ranOutLoggedAt < 60_000) return { ok }
+    if (ranOut) ranOutLoggedAt = Date.now()
+    if (op !== 'warm' && op !== 'cancel' && (op !== 'mark' || !ok)) orca.log(`mouse for the reply box, ${op}: ${ok ? 'done' : `not done (${keysWhy()})`}`)
+    return { ok }
+  }) as never)
 
   // Whether the server answers directly: the panel then sends pictures as they are.
   orca.panels.handle('link.direct' as never, (() => isDirect()) as never)

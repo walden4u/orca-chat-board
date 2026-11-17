@@ -7,7 +7,7 @@ import { STATUS_ICON, type StatusKind } from './icons.ts'
 import { locale, setLanguage, t } from './i18n.ts'
 import { isStale } from '../src/monitor.ts'
 import { heldByKeys, hidePreview, schedulePreview } from './preview.ts'
-import { SHOWING_TAKES_KEYS, closeReply, openReply, pointerOverPanel, replyKey, setReplyChat, setReplyJudge, setReplyWaiting } from './reply.ts'
+import { closeReply, openReply, replyKey, setReplyMouse, type MouseOp, setReplyChat, setReplyJudge, setReplyWaiting } from './reply.ts'
 
 const INTERRUPTED = new Set(['interruption', 'failure', 'cancellation'])
 
@@ -368,15 +368,9 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       onEngaged: async (asked = false) => {
         // Asked for with Enter in an empty field: shown whatever the setting says.
         if ((!followChat && !asked) || c.closed) return false
-        if (SHOWING_TAKES_KEYS) {
-          // Already the tab on screen: nothing to show, and asking Orca to show it would hand the
-          // keys to its terminal, which this box cannot get back without a click.
-          if (view?.cards.find((x) => x.key === c.key)?.active) return false
-          // Opened with the keyboard, the pointer somewhere else: no click could bring the keys
-          // back from the terminal, so the tab is left as it is and the keys stay in the box.
-          if (!asked && !pointerOverPanel()) return false
-          void orca.plugin.request('keys.click', { warm: true }).catch(() => null)
-        }
+        // The chat comes up in the browser tab and the keyboard goes there with it: the mouse of
+        // this machine is made ready to bring it back (see `takeBack` in reply.ts).
+        void replyMouse('warm')
         const r = await orca.plugin.request('chat.focus', { key: c.key }).catch(() => null)
         if (r?.ok && view && r.error !== 'chat-workspace') {
           for (const x of view.cards) x.active = x.key === c.key
@@ -385,7 +379,6 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
         return true
       },
       onKeys: (what) => trace(`reply keys ${id}: ${what}`),
-      onClick: () => orca.plugin.request('keys.click', {}).catch(() => null),
       onSent: (title) => {
         trace(`reply left ${id}: sent`)
         showFlash(t.sent(title), true)
@@ -959,6 +952,14 @@ function render(force = false): void {
   root.append(...children)
   keepPicked()
 }
+
+/** A step of the mouse, made by this machine's own worker (never the server's: that mouse is someone else's). */
+const replyMouse = (op: MouseOp): Promise<boolean> =>
+  orca.plugin
+    .request('keys.click' as never, { op } as never)
+    .then((r) => (r as { ok?: boolean } | null)?.ok === true)
+    .catch(() => false)
+setReplyMouse(replyMouse)
 
 // ---------- arrow keys ----------
 
