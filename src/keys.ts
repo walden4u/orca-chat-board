@@ -22,7 +22,9 @@ export type Clicker = (op: KeysOp) => Promise<boolean>
 // start one. It ends with the worker (its input closes). It acts only while the window in front
 // belongs to Orca. One line in, one line out:
 //   q  -> "<ms since your last key or mouse move> <1 when Orca is in front> <the program in front>"
-//   k  -> "ok <x> <y>": where the pointer is      c -> presses the left button in place
+//   k  -> "ok <x> <y>": where the pointer is      u -> "under <the program under the pointer>"
+//   c  -> presses the left button in place, when the window under the pointer is Orca's too
+//         (else "pointer-over <program>")
 //   m <x> <y> -> remembers where the pointer is and puts it there
 //   r  -> puts it back where `m` found it
 const HELPER = `
@@ -35,6 +37,8 @@ Add-Type -Namespace W -Name M -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LastInput i);
 [DllImport("user32.dll")] public static extern bool GetCursorPos(out Point p);
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern System.IntPtr WindowFromPoint(Point p);
+[DllImport("user32.dll")] public static extern System.IntPtr GetAncestor(System.IntPtr h, uint flags);
 public static uint IdleMs() { LastInput i = new LastInput(); i.size = 8; GetLastInputInfo(ref i); return (uint)Environment.TickCount - i.time; }
 '@
 function FrontName {
@@ -43,6 +47,15 @@ function FrontName {
   return [string](Get-Process -Id $p -ErrorAction SilentlyContinue).ProcessName
 }
 function Front { return ((FrontName) -like 'Orca*') }
+# The program whose window is under the pointer: with two screens, Orca can be in front while the
+# pointer is over another program's window, and a click there would be that program's.
+function UnderName {
+  $pt = New-Object W.M+Point
+  if (-not [W.M]::GetCursorPos([ref]$pt)) { return '' }
+  $p = 0
+  [void][W.M]::GetWindowThreadProcessId([W.M]::GetAncestor([W.M]::WindowFromPoint($pt), 2), [ref]$p)
+  return [string](Get-Process -Id $p -ErrorAction SilentlyContinue).ProcessName
+}
 $back = $null
 [Console]::Out.WriteLine('ready')
 while (($l = [Console]::In.ReadLine()) -ne $null) {
@@ -53,11 +66,18 @@ while (($l = [Console]::In.ReadLine()) -ne $null) {
   } elseif ($l -eq 'k') {
     $p = New-Object W.M+Point
     if ([W.M]::GetCursorPos([ref]$p)) { $out = ('ok {0} {1}' -f $p.x, $p.y) }
+  } elseif ($l -eq 'u') {
+    $out = ('under {0}' -f ((UnderName) -replace ' ', '_'))
   } elseif ($l -eq 'c') {
     if (Front) {
-      [W.M]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
-      [W.M]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
-      $out = 'ok'
+      $u = UnderName
+      if ($u -like 'Orca*') {
+        [W.M]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+        [W.M]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+        $out = 'ok'
+      } else {
+        $out = ('pointer-over {0}' -f ($u -replace ' ', '_'))
+      }
     }
   } elseif ($l -like 'm *') {
     $to = $l.Split(' ')
@@ -140,6 +160,8 @@ function ask(command: string): Promise<string> {
 }
 
 const STILL_MS = 1500
+/** How long the box has, once you are back in Orca, to call the mouse off (see `untilStill`). */
+const BACK_GRACE_MS = 400
 /** A click in place is for a box that just opened: not worth making long after. */
 const GIVE_UP_MS = 8000
 /**
@@ -188,6 +210,9 @@ async function untilStill(limitMs: number): Promise<boolean> {
       stillest = Math.max(stillest, Number(idle) || 0)
     }
     if (isFront && (wasFront === false || Number(idle) >= STILL_MS)) {
+      // You just came back: Orca may hand the keys to the panel by itself, and the box then
+      // calls this wait off. It gets a moment to say so before the pointer is touched.
+      if (wasFront === false) await new Promise((r) => setTimeout(r, BACK_GRACE_MS))
       if (mine !== waits) why = 'cancelled'
       return mine === waits
     }

@@ -478,6 +478,12 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     if (document.visibilityState !== 'visible') return
     setTimeout(() => {
       if (open && !readOnly && !busy && document.activeElement !== input) input.focus()
+      // Orca gave the keys back to this panel by itself (it had them when you left): the mouse
+      // that was waiting for you to come back has nothing left to do, and must not move.
+      if (open && taking && hasKeys()) {
+        stopped = true
+        void mouse('cancel')
+      }
     }, 0)
   }
   window.addEventListener('focus', onShown)
