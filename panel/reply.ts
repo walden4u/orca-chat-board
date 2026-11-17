@@ -56,7 +56,7 @@ export type ReplyHandlers = {
    * You are at this box: at once for one you opened, at your first click for one that opened by
    * itself. Orca may move the keyboard while it answers; the field takes it back afterwards.
    */
-  onEngaged: () => Promise<boolean>
+  onEngaged: (asked?: boolean) => Promise<boolean>
   /** After Orca was asked to show the chat: where the keyboard ended up, for the log. */
   onKeys: (what: string) => void
   /**
@@ -678,6 +678,9 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     // A held key is not a decision: one Enter, one message.
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229 || e.repeat) return
     e.preventDefault()
+    // Enter with nothing to send asks for the chat itself: Orca shows its tab beside this box
+    // (as a click in the box does), and the field takes the keys back.
+    if (!input.value.trim() && !pictures.length && !readOnly && !busy) return engage(true)
     void submit()
   }
   document.addEventListener('keydown', onKey, true)
@@ -783,15 +786,16 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     }, 0)
   }
   let engaged = false
-  const engage = () => {
-    if (engaged) return
+  // `asked`: you pressed Enter for it, so it is done again, and with the pointer anywhere.
+  const engage = (asked = false) => {
+    if (engaged && !asked) return
     engaged = true
-    void handlers.onEngaged().then((moved) => {
+    void handlers.onEngaged(asked).then((moved) => {
       if (open && !readOnly && !busy && document.activeElement !== input) input.focus()
       if (moved) setTimeout(() => void takeBack(), 150)
     })
   }
-  if (target.auto || target.byArrows) dialog.addEventListener('pointerdown', engage, true)
+  if (target.auto || target.byArrows) dialog.addEventListener('pointerdown', () => engage(), true)
   else engage()
 
   const loadExchange = () =>
