@@ -6,7 +6,7 @@ import { AGENT_LOGOS, AGENT_NAMES } from './logos.ts'
 import { STATUS_ICON, type StatusKind } from './icons.ts'
 import { locale, setLanguage, t } from './i18n.ts'
 import { isStale } from '../src/monitor.ts'
-import { hidePreview, schedulePreview } from './preview.ts'
+import { heldByKeys, hidePreview, schedulePreview } from './preview.ts'
 import { SHOWING_TAKES_KEYS, closeReply, openReply, pointerOverPanel, replyKey, setReplyChat, setReplyJudge, setReplyWaiting } from './reply.ts'
 
 const INTERRUPTED = new Set(['interruption', 'failure', 'cancellation'])
@@ -580,10 +580,13 @@ function renderCard(c: CardView): HTMLElement {
   card.onkeydown = (e) => {
     if (e.target === card && e.key === 'Enter' && !c.closed) reply()
   }
-  card.onmouseenter = () => {
+  card.onmouseenter = (e) => {
+    if (heldByKeys(e)) return
     if (show.preview && !c.closed && !dragKey && editingCard !== c.key) schedulePreview(c.key, card)
   }
-  card.onmouseleave = () => hidePreview()
+  card.onmouseleave = (e) => {
+    if (!heldByKeys(e)) hidePreview()
+  }
   card.ondragstart = (e) => {
     hidePreview()
     dragKey = c.key
@@ -962,6 +965,8 @@ function keepPicked(): void {
  * arrow goes to the first chat that waits for your answer, or the first card.
  */
 function onArrow(e: KeyboardEvent): void {
+  // Escape puts away the preview the arrow keys brought up (a reply box has its own Escape).
+  if (e.key === 'Escape' && !replyKey() && !editingCard) hidePreview()
   const step = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key]
   if (!step || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing || replyKey() || editingCard) return
   const at = document.activeElement as HTMLElement | null
@@ -983,6 +988,11 @@ function onArrow(e: KeyboardEvent): void {
   pickedKey = target.dataset.key ?? null
   target.focus()
   target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  // The card the keys are on shows what a hover would: your last prompt and the agent's reply.
+  // (Showing the chat itself at every step would take the keys away from the board.)
+  const picked = view?.cards.find((c) => c.key === pickedKey)
+  if (picked && show.preview && !picked.closed) schedulePreview(picked.key, target, true)
+  else hidePreview()
 }
 
 // ---------- boot ----------
@@ -1001,7 +1011,10 @@ function boot(): void {
   document.addEventListener('focusin', (e) => {
     const card = (e.target as Element).closest?.('.board .card') as HTMLElement | null
     if (card?.dataset.key && e.target === card) pickedKey = card.dataset.key
+    // The keys went somewhere of their own (a field, a button): the arrow keys' preview goes.
+    else if (!card) hidePreview()
   })
+  window.addEventListener('blur', () => hidePreview())
   // While a button of the board is held down, redraws wait: the click belongs to the button that
   // was pressed, and a new one in its place would never get it.
   document.addEventListener('pointerdown', (e) => {

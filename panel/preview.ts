@@ -22,6 +22,23 @@ let pop: HTMLDivElement | null = null
 let currentKey: string | null = null
 /** Counts hovers, so a reply that arrives after the pointer moved on (even back to the same card) is dropped. */
 let hover = 0
+/** The popover is for the card the arrow keys are on, and not for the one under the pointer. */
+let keyed = false
+const KEYED_DELAY_MS = 150
+// Where the pointer last really was. Cards scrolling or being redrawn under a pointer at rest make
+// the browser report moves, enters and leaves of its own, at these same coordinates.
+let seenX: number | null = null
+let seenY: number | null = null
+document.addEventListener('mousemove', (e) => {
+  seenX = e.screenX
+  seenY = e.screenY
+})
+const real = (e: MouseEvent) => e.screenX !== seenX || e.screenY !== seenY
+
+/** Whether this mouse event should leave the popover alone: it is the arrow keys', and the pointer did not move. */
+export function heldByKeys(e: MouseEvent): boolean {
+  return keyed && !real(e)
+}
 
 /** Plain text from the agent's markdown: drops emphasis markers and code fences, keeps line breaks. */
 export function plain(text: string): string {
@@ -97,6 +114,7 @@ export function hidePreview(): void {
   if (timer) clearTimeout(timer)
   timer = null
   currentKey = null
+  keyed = false
   hover++
   document.removeEventListener('mousemove', onMove, true)
   document.documentElement.removeEventListener('mouseleave', hidePreview)
@@ -110,17 +128,24 @@ export function hidePreview(): void {
 
 /** Hides the popover once the pointer is no longer on that card (cards are redrawn under it). */
 function onMove(e: MouseEvent): void {
+  // The arrow keys' popover goes once you take the mouse, wherever that is.
+  if (keyed) {
+    if (real(e)) hidePreview()
+    return
+  }
   const over = (e.target as Element | null)?.closest?.('.card')?.getAttribute('data-key')
   if (over !== currentKey) hidePreview()
 }
 
-export function schedulePreview(key: string, anchor: HTMLElement): void {
+/** `byKeys`: for the card the arrow keys went to; it stays until you move on, take the mouse or leave the board. */
+export function schedulePreview(key: string, anchor: HTMLElement, byKeys = false): void {
   hidePreview()
   currentKey = key
+  keyed = byKeys
   const mine = hover
   document.addEventListener('mousemove', onMove, true)
   // The pointer can leave the panel while its card is being redrawn, and then no card hears it.
-  document.documentElement.addEventListener('mouseleave', hidePreview)
+  if (!byKeys) document.documentElement.addEventListener('mouseleave', hidePreview)
   const warm = Date.now() - lastShownAt < WARM_WINDOW_MS
   timer = setTimeout(async () => {
     timer = null
@@ -138,5 +163,5 @@ export function schedulePreview(key: string, anchor: HTMLElement): void {
     const shown = pop
     requestAnimationFrame(() => shown.classList.add('show')) // fade and slide in
     lastShownAt = Date.now()
-  }, warm ? WARM_DELAY_MS : DELAY_MS)
+  }, warm ? WARM_DELAY_MS : byKeys ? KEYED_DELAY_MS : DELAY_MS)
 }
