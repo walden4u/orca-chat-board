@@ -55,8 +55,8 @@ const host = (storage: Record<string, unknown> = {}, focusedHandles: () => strin
 const noSessions = async () => ({})
 setSessionsReader(noSessions)
 // A test never presses the mouse of the machine it runs on.
-let clicks = 0
-setClicker(async () => (clicks++, true))
+const mouse: string[] = []
+setClicker(async (op) => (mouse.push(op), true))
 
 afterEach(() => {
   setOrcaRunner(null)
@@ -184,14 +184,12 @@ test('focus switches to the live handle', async () => {
   await worker.deactivate()
 })
 
-test('the click for the reply box is asked of the machine only when it is not just a warm-up', async () => {
+test('the mouse steps for the reply box go to the machine as the panel asks for them', async () => {
   fakeCli(() => [term(1)])
   const worker = await mountWorker(main, { host: host() })
-  const before = clicks
-  assert.deepEqual(await worker.request('keys.click', { warm: true }), { ok: true })
-  assert.equal(clicks, before)
-  assert.deepEqual(await worker.request('keys.click', {}), { ok: true })
-  assert.equal(clicks, before + 1)
+  mouse.length = 0
+  for (const op of ['mark', 'move', 'click', 'restore'] as const) assert.deepEqual(await worker.request('keys.click', { op }), { ok: true })
+  assert.deepEqual(mouse, ['mark', 'move', 'click', 'restore'])
   await worker.deactivate()
 })
 
@@ -797,6 +795,58 @@ test('a turn whose end shows up in a listing before its event is still news', as
   await worker.deactivate()
 })
 
+test('a turn over before its start was handled is still news', async () => {
+  // A one-line answer: the listing made for the "working" event already says "done".
+  let ps: { state: 'working' | 'done'; at: number } = { state: 'done', at: 5 }
+  setOrcaRunner(async (args) => {
+    if (args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: [term(1)], visualLayouts: [] } })
+    if (args[1] === 'ps') {
+      const agents = [{ paneKey: 'tab1:leaf', parentPaneKey: null, state: ps.state, agentType: 'claude', hasLivePty: true, stateStartedAt: ps.at }]
+      return JSON.stringify({ ok: true, result: { worktrees: [{ worktreeId: WT, path: '/Users/me/toolbox', agents }] } })
+    }
+    throw new Error(`unexpected ${args.join(' ')}`)
+  })
+  const worker = await mountWorker(main, { host: host() })
+  await worker.request('board.get', { refresh: true })
+  const status = (state: 'working' | 'done', receivedAt: number) =>
+    worker.emit('agent.status.changed', { workspaceId: null, paneKey: 'term_1', terminalId: 'term_1', state, receivedAt })
+  const unseen = async () => ((await worker.request('board.get', {})) as BoardView).cards.filter((c) => c.unseenAt).map((c) => c.key)
+
+  ps = { state: 'done', at: 12 }
+  await status('working', 10) // its refresh lists the turn as over already
+  assert.deepEqual(await unseen(), ['tab1'])
+  await status('done', 12) // nothing new, and nothing lost
+  assert.deepEqual(await unseen(), ['tab1'])
+  // The next turn starts as usual and clears the mark.
+  ps = { state: 'working', at: 20 }
+  await status('working', 20)
+  assert.deepEqual(await unseen(), [])
+  await worker.deactivate()
+})
+
+test('a turn whose end the three-second look finds before its event is still news', async () => {
+  // Orca's list of agents, read at the end of every refresh, says "done" before the event is handled.
+  setOrcaRunner(async (args) => {
+    if (args[1] === 'list') return JSON.stringify({ ok: true, result: { terminals: [term(1)], visualLayouts: [] } })
+    if (args[1] === 'ps') return JSON.stringify({ ok: true, result: { worktrees: [] } })
+    throw new Error(`unexpected ${args.join(' ')}`)
+  })
+  const shared = mockHost({ results: { 'agents.list': { agents: [] }, 'workspace.readContext': null } })
+  const worker = await mountWorker(main, { host: shared })
+  await worker.request('board.get', { refresh: true })
+  const status = (state: 'working' | 'done', receivedAt: number) =>
+    worker.emit('agent.status.changed', { workspaceId: null, paneKey: 'term_1', terminalId: 'term_1', state, receivedAt })
+  const unseen = (v: unknown) => (v as BoardView).cards.filter((c) => c.unseenAt).map((c) => c.key)
+
+  await status('working', 10)
+  shared.respond('agents.list', { agents: [{ terminalId: 'term_1', title: null, agent: 'claude', state: 'done', stateStartedAt: 20 }] })
+  // The look itself hands the panel the mark: that is what opens the reply box.
+  assert.deepEqual(unseen(await worker.request('seen.check', {})), ['tab1'])
+  await status('done', 20) // nothing new, and nothing lost
+  assert.deepEqual(unseen(await worker.request('board.get', {})), ['tab1'])
+  await worker.deactivate()
+})
+
 test('a chat Orca lost track of gets its status from its terminal', async () => {
   const BUSY = ['● Reading files', '✽ Wrangling… (2m 22s · ↓ 9.4k tokens)', '❯', '  auto mode on']
   const IDLE = ['● Done.', '✻ Cooked for 10s · done 9:12 PM', '❯', '  auto mode on']
@@ -841,6 +891,35 @@ test('a chat Orca lost track of gets its status from its terminal', async () => 
   await worker.emit('agent.status.changed', { workspaceId: null, paneKey: 'term_1', terminalId: 'term_1', state: 'working', receivedAt: Date.now() })
   lastOutputAt = Date.now() - 60_000
   assert.equal((await card()).state, 'working')
+  await worker.deactivate()
+})
+
+test("Orca's \"working\" that the terminal no longer bears out is taken as done; a quiet agent with a busy screen is left alone", async () => {
+  const BUSY = ['● Running the tests', '✽ Wrangling… (2m 22s · ↓ 9.4k tokens)', '❯']
+  const IDLE = ['● Done.', '✻ Cooked for 10s · done 9:12 PM', '❯']
+  const quietSince = Date.now() - 60_000
+  let lastOutputAt = quietSince - 60_000
+  setOrcaRunner(async (args) => {
+    if (args[1] === 'list') {
+      return JSON.stringify({ ok: true, result: { terminals: [term(1, { lastOutputAt }), term(2, { lastOutputAt })], visualLayouts: [] } })
+    }
+    if (args[1] === 'read') return JSON.stringify({ ok: true, result: { terminal: { tail: args.includes('term_1') ? IDLE : BUSY } } })
+    if (args[1] === 'ps') return JSON.stringify({ ok: true, result: { worktrees: [] } })
+    return JSON.stringify({ ok: true, result: {} })
+  })
+  const worker = await mountWorker(main, { host: host() })
+  await worker.request('board.get', { refresh: true })
+  await worker.request('card.update', { key: 'tab1', watch: true })
+  // Orca said both started working, and then nothing more of either.
+  lastOutputAt = Date.now()
+  for (const terminalId of ['term_1', 'term_2']) {
+    await worker.emit('agent.status.changed', { workspaceId: null, paneKey: terminalId, terminalId, state: 'working', receivedAt: quietSince - 1000 })
+  }
+  lastOutputAt = quietSince
+  const cards = ((await worker.request('board.get', { refresh: true })) as BoardView).cards
+  const of = (key: string) => cards.find((c) => c.key === key)!
+  assert.deepEqual([of('tab1').state, of('tab1').unseenAt], ['done', quietSince], 'its reply box is due, as for a turn Orca reports')
+  assert.equal(of('tab2').state, 'working')
   await worker.deactivate()
 })
 

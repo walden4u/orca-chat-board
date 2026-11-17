@@ -12,7 +12,10 @@ declare module 'node:child_process' {
       windowsVerbatimArguments?: boolean
     },
     callback: (error: (Error & { code?: unknown }) | null, stdout: string, stderr: string) => void
-  ): { stdin?: { end(data?: string): void; write(data: string): boolean } | null }
+  ): {
+    stdin?: { end(data?: string): void; write(data: string): boolean } | null
+    stdout?: { on(event: 'data', listener: (chunk: string) => void): unknown } | null
+  }
 }
 
 declare function btoa(data: string): string

@@ -54,14 +54,31 @@ export type ReplyHandlers = {
   onEngaged: () => Promise<boolean>
   /** After Orca was asked to show the chat: where the keyboard ended up, for the log. */
   onKeys: (what: string) => void
-  /** Asks for a mouse click where the pointer is (see `takeBack`). */
-  onClick: () => Promise<unknown>
+}
+
+/** A step of the mouse made for you (see `takeBack`): `KeysOp` of the worker's keys.ts. */
+export type MouseOp = 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'restore' | 'cancel'
+let mouse: (op: MouseOp) => Promise<boolean> = async () => false
+/** The board gives the reply boxes their way to the mouse. */
+export function setReplyMouse(next: (op: MouseOp) => Promise<boolean>): void {
+  mouse = next
 }
 
 /** Whether the pointer is over this frame: a click made where it is must land here. */
 let pointerIn = false
 document.addEventListener('pointermove', () => (pointerIn = true), true)
-document.addEventListener('pointerdown', () => (pointerIn = true), true)
+let markedAt = 0
+document.addEventListener(
+  'pointerdown',
+  (e) => {
+    pointerIn = true
+    // Where you click in this panel is where a click can be made for you later (see `takeBack`).
+    if (!SHOWING_TAKES_KEYS || !e.isTrusted || Date.now() - markedAt < 2000) return
+    markedAt = Date.now()
+    void mouse('mark')
+  },
+  true
+)
 document.documentElement.addEventListener('mouseleave', () => (pointerIn = false))
 
 /**
@@ -476,6 +493,10 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     if (input.value.trim() && input.value !== filled) drafts.set(target.key, input.value)
     else drafts.delete(target.key)
     document.removeEventListener('keydown', onKey, true)
+    if (taking) {
+      stopped = true
+      void mouse('cancel')
+    }
     backdrop.remove()
     current = null
   }
@@ -642,23 +663,97 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // you where the pointer already is, over this box, and a sheet over the box takes it, so that
   // it presses none of the buttons.
   const hasKeys = () => document.activeElement === input && document.hasFocus()
-  const takeBack = () => {
-    if (!open || readOnly || busy) return
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  let taking = false
+  let stopped = false
+  // `whenStill`: for a box that opened by itself. You may be typing in a terminal just then, and
+  // keys taken in the middle of a word would end up in this box, so the mouse waits until it and
+  // the keyboard have been still for a moment (and gives up after some seconds). With the
+  // pointer somewhere else, it is first put on the spot of your last click in this panel, and
+  // put back afterwards; the click is made only once the sheet has felt the pointer arrive.
+  const takeBack = async (whenStill = false) => {
+    if (!open || readOnly || busy || taking) return
     if (hasKeys()) return handlers.onKeys('kept')
-    if (!pointerIn) return handlers.onKeys('with the terminal, pointer elsewhere')
-    const sheet = node('div', 'reply-sheet')
+    taking = true
+    let brought = false
     let clicked = false
-    sheet.addEventListener('click', () => {
-      clicked = true
-      sheet.remove()
-      if (open) input.focus()
-    })
-    document.body.append(sheet)
+    let what = 'with the terminal, no click came'
+    stopped = false
+    // The sheet is there only for the moment of the click: while the mouse waits for you (which
+    // may be minutes, with the pointer elsewhere) the box stays as it is.
+    const click = async (op: MouseOp) => {
+      const sheet = node('div', 'reply-sheet')
+      sheet.addEventListener('click', () => {
+        clicked = true
+        sheet.remove()
+        if (open) input.focus()
+      })
+      document.body.append(sheet)
+      try {
+        await mouse(op)
+        await pause(250)
+      } finally {
+        sheet.remove()
+      }
+    }
+    try {
+      if (pointerIn) {
+        await click(whenStill ? 'click-idle' : 'click')
+      } else {
+        // One wait of the worker is short (a request has 30 s); the box goes on asking while it
+        // is open and the keys are elsewhere, for as long as you may reasonably be away.
+        const until = Date.now() + 30 * 60_000
+        while (open && !brought && !hasKeys() && !stopped && Date.now() < until) {
+          const asked = Date.now()
+          brought = await mouse('move')
+          // Refused at once (no spot remembered yet, no helper): not asked again in a hurry.
+          if (!brought && Date.now() - asked < 2000) await pause(3000)
+        }
+        if (!brought) what = hasKeys() ? 'back by your own click' : 'with the terminal, pointer elsewhere and not brought here'
+        else {
+          await pause(150)
+          // The panel felt the pointer arrive, or the spot is no longer on it: then no click.
+          if (!pointerIn) what = 'with the terminal, the pointer did not land on the panel'
+          else if (open && !hasKeys()) await click('click')
+        }
+      }
+      if (hasKeys()) what = clicked ? 'back by a click' : 'kept'
+      else if (clicked) what = 'clicked, still with the terminal'
+    } finally {
+      taking = false
+      if (brought) void mouse('restore')
+      if (open) handlers.onKeys(what)
+    }
+  }
+  // You clicked in the box yourself while the mouse was waiting for you: it has nothing left to do.
+  dialog.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (!taking || !e.isTrusted) return
+      stopped = true
+      void mouse('cancel')
+    },
+    true
+  )
+  // A box that opened by itself takes the keys too: at once when this panel has them anyway,
+  // and otherwise by that click, once you are not typing.
+  if (!readOnly && target.auto) {
     setTimeout(() => {
-      sheet.remove()
-      if (open) handlers.onKeys(hasKeys() ? 'back by a click' : clicked ? 'clicked, still with the terminal' : 'with the terminal, no click came')
-    }, 1500)
-    void handlers.onClick()
+      if (!open) return
+      const seen = [document.hasFocus() ? 'T' : 'F']
+      if (document.hasFocus()) input.focus()
+      else if (SHOWING_TAKES_KEYS) void takeBack(true)
+      // The keys may leave in the moments after (seen 2026-11-17: this panel had them when the
+      // box opened, and you found them in the terminal): looked at again a few times.
+      for (const ms of [300, 1000, 2000, 4000]) {
+        setTimeout(() => {
+          if (!open) return
+          seen.push(hasKeys() ? 'T' : 'F')
+          if (!hasKeys() && SHOWING_TAKES_KEYS) void takeBack(true)
+          if (ms === 4000) handlers.onKeys(`opened by itself, panel had the keys at 0, 0.3, 1, 2, 4 s: ${seen.join(' ')}`)
+        }, ms)
+      }
+    }, 0)
   }
   let engaged = false
   const engage = () => {
@@ -666,7 +761,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     engaged = true
     void handlers.onEngaged().then((moved) => {
       if (open && !readOnly && !busy && document.activeElement !== input) input.focus()
-      if (moved) setTimeout(takeBack, 150)
+      if (moved) setTimeout(() => void takeBack(), 150)
     })
   }
   if (target.auto) dialog.addEventListener('pointerdown', engage, true)

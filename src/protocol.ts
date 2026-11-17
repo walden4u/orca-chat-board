@@ -188,11 +188,10 @@ declare module 'orca' {
     /** Turns one of the plugin's on/off settings on or off (Orca's CLI cannot). */
     'setting.set': { input: { key: string; on: boolean }; output: { ok: boolean } }
     /**
-     * Presses the mouse button where the pointer is (Windows, and only while Orca is in front), so
-     * the reply box under it gets the keyboard back after Orca gave it to a terminal. `warm` only
-     * gets ready for that. Answers this Orca's own panel, never a board on another machine.
+     * Mouse steps that give the reply box the keyboard (Windows, and only while Orca is in front):
+     * see `KeysOp` in keys.ts. Answers this Orca's own panel, never a board on another machine.
      */
-    'keys.click': { input: { warm?: boolean }; output: { ok: boolean } }
+    'keys.click': { input: { op: 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'restore' | 'cancel' }; output: { ok: boolean } }
     /** Shows the chat's terminal tab in Orca. */
     'chat.focus': { input: { key: string }; output: { ok: boolean; error: 'closed' | string | null } }
     /**

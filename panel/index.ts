@@ -7,7 +7,7 @@ import { STATUS_ICON, type StatusKind } from './icons.ts'
 import { locale, setLanguage, t } from './i18n.ts'
 import { isStale } from '../src/monitor.ts'
 import { hidePreview, schedulePreview } from './preview.ts'
-import { SHOWING_TAKES_KEYS, closeReply, openReply, pointerOverPanel, replyKey, setReplyChat, setReplyJudge, setReplyWaiting } from './reply.ts'
+import { SHOWING_TAKES_KEYS, closeReply, openReply, pointerOverPanel, replyKey, setReplyMouse, type MouseOp, setReplyChat, setReplyJudge, setReplyWaiting } from './reply.ts'
 
 const INTERRUPTED = new Set(['interruption', 'failure', 'cancellation'])
 
@@ -366,7 +366,7 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' = 'click'): void 
           // Opened with the keyboard, the pointer somewhere else: no click could bring the keys
           // back from the terminal, so the tab is left as it is and the keys stay in the box.
           if (!pointerOverPanel()) return false
-          void orca.plugin.request('keys.click', { warm: true }).catch(() => null)
+          void replyMouse('warm')
         }
         const r = await orca.plugin.request('chat.focus', { key: c.key }).catch(() => null)
         if (r?.ok && view && r.error !== 'chat-workspace') {
@@ -376,7 +376,6 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' = 'click'): void 
         return true
       },
       onKeys: (what) => trace(`reply keys ${id}: ${what}`),
-      onClick: () => orca.plugin.request('keys.click', {}).catch(() => null),
       onSent: (title) => {
         trace(`reply left ${id}: sent`)
         showFlash(t.sent(title), true)
@@ -940,6 +939,14 @@ function render(force = false): void {
   root.append(...children)
   keepPicked()
 }
+
+/** A step of the mouse, made by the worker on this machine (a board on another machine has none). */
+const replyMouse = (op: MouseOp): Promise<boolean> =>
+  orca.plugin
+    .request('keys.click', { op })
+    .then((r) => (r as { ok?: boolean } | null)?.ok === true)
+    .catch(() => false)
+setReplyMouse(replyMouse)
 
 // ---------- arrow keys ----------
 

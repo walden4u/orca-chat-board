@@ -57,7 +57,7 @@ import { folderIsHere, readTextFile, runTool } from './tools.ts'
 import { GOAL_FILE, parseGoalFile } from './goal.ts'
 import { joinPath, orcaRuntimeId } from './cli.ts'
 import { readClaudeSessions, sessionSaved } from './sessions.ts'
-import { clickInPlace, warmClicker } from './keys.ts'
+import { keys, keysWhy, markedSpot, setMarkedSpot } from './keys.ts'
 
 const BOARD_KEY = 'board'
 /** Which run of Orca the board last listed chats from. */
@@ -67,6 +67,8 @@ const SESSIONS_EVERY_MS = 20_000
 /** No more chats than this are opened again after Orca starts. */
 const MAX_RESTORED = 12
 const STATUS_KEY = 'status'
+/** Where you last clicked in the panel (see keys.ts). */
+const KEYS_SPOT_KEY = 'keysSpot'
 const MONITORS_KEY = 'monitors'
 /** While synced, light refreshes re-read the workspace statuses at most this often. */
 const STATUS_POLL_MS = 10_000
@@ -89,6 +91,10 @@ const ACTIVE_MS = 6000
 const STARTED_AFTER_MS = 10_000
 /** A look at the screen that changed nothing is not repeated sooner than this. */
 const PROBE_EVERY_MS = 5000
+/** A terminal this long without output, while Orca says its agent works: worth a look at the screen. */
+const STUCK_AFTER_MS = 8000
+/** How often such a terminal is looked at again. (A working agent's spinner is output: its terminal is seldom this quiet.) */
+const PROBE_STUCK_MS = 5000
 
 /**
  * How the judge runs: the cheapest model that passed the check in docs/auto-reply-research.md.
@@ -245,18 +251,42 @@ export default function activate(orca: OrcaWorkerApi): void {
     return { columns: state.columns, cards, refreshedAt, error: lastError, synced, orcaNames: synced && statusNames !== null }
   }
 
-  async function seedStatus(): Promise<void> {
+  /**
+   * A turn's end found in a listing before its event (events wait their turn behind a refresh):
+   * the event then finds nothing new, so the end is noted here, by the same rule as for the
+   * event: news unless it is a loop's run or you are looking at it.
+   */
+  async function noteStopped(state: BoardState, stopped: { key: string; handle: string; at: number }[]): Promise<BoardState> {
+    let next = state
+    for (const s of stopped) {
+      const card = next.cards[s.key]
+      if (!card || card.sessionId || (await liveMonitor(s.handle)) || (!card.watch && visible.has(s.key))) continue
+      if (card.watch) orca.log(`checked chat ${s.key.slice(0, 8)}: working -> stopped, seen in a listing before its event`)
+      next = markUnseen(next, [s.key], s.at || Date.now())
+    }
+    return next
+  }
+
+  /** Status from Orca's list of agents, which every refresh reads (the light ones too). */
+  async function seedStatus(state: BoardState): Promise<BoardState> {
     try {
       const { agents } = await orca.host.call('agents.list')
       const status = await loadStatus()
+      const stopped: { key: string; handle: string; at: number }[] = []
       for (const a of agents) {
         if (!a.terminalId) continue
         const prev = status[a.terminalId]
-        if (!prev || prev.at < a.stateStartedAt) status[a.terminalId] = { state: a.state, at: a.stateStartedAt, outcome: null }
+        if (prev && prev.at >= a.stateStartedAt) continue
+        status[a.terminalId] = { state: a.state, at: a.stateStartedAt, outcome: null }
+        const key = keyOfHandle(a.terminalId)
+        // This list can be ahead of the event too (seen 2026-11-17: "done -> done, not news").
+        if (key && prev?.state === 'working' && a.state !== 'working') stopped.push({ key, handle: a.terminalId, at: a.stateStartedAt })
       }
       await orca.storage.set(STATUS_KEY, status)
+      return await noteStopped(state, stopped)
     } catch (err) {
       orca.log(`agents.list failed: ${(err as Error).message}`)
+      return state
     }
   }
 
@@ -385,15 +415,7 @@ export default function activate(orca: OrcaWorkerApi): void {
     }
     if (changed) await orca.storage.set(STATUS_KEY, status)
     // Chat tabs: Orca's own unread flag is the unseen mark (their focus cannot be read).
-    let next = markUnseen(markUnseen(state, read, null), unread, Date.now())
-    // The same rule as for the event: news unless it is a loop's run or you are looking at it.
-    for (const s of stopped) {
-      const card = next.cards[s.key]
-      if (!card || card.sessionId || (await liveMonitor(s.handle)) || (!card.watch && visible.has(s.key))) continue
-      if (card.watch) orca.log(`checked chat ${s.key.slice(0, 8)}: working -> stopped, seen in a listing before its event`)
-      next = markUnseen(next, [s.key], s.at || Date.now())
-    }
-    return next
+    return noteStopped(markUnseen(markUnseen(state, read, null), unread, Date.now()), stopped)
   }
 
   /** When a terminal's screen was last read without learning anything, to keep those reads rare. */
@@ -417,9 +439,14 @@ export default function activate(orca: OrcaWorkerApi): void {
       const out = term.lastOutputAt ?? 0
       const rec = status[handle]
       const active = now - out < ACTIVE_MS
-      const ending = rec?.inferred === true && rec.state === 'working' && !active
+      // Orca's own "working" that its terminal no longer bears out: a session can stop reporting
+      // in the middle of a turn too (seen 2026-11-17: Orca's record of a chat stayed at one tool
+      // call for the rest of the day). Not Orca's monitoring mode, where a quiet terminal is the
+      // rule: there the main agent's turn is over and Orca says so.
+      const stuck = !!rec && rec.inferred !== true && rec.state === 'working' && (rec.main ?? 'working') === 'working' && now - out > STUCK_AFTER_MS
+      const ending = (rec?.inferred === true && rec.state === 'working' && !active) || stuck
       const starting = (!rec || rec.state === 'done') && active && out - (rec?.at ?? 0) > STARTED_AFTER_MS
-      if ((!ending && !starting) || now - (probedAt[handle] ?? 0) < PROBE_EVERY_MS) continue
+      if ((!ending && !starting) || now - (probedAt[handle] ?? 0) < (stuck ? PROBE_STUCK_MS : PROBE_EVERY_MS)) continue
       let busy: boolean
       try {
         busy = looksBusy(await readTerminalScreen(handle))
@@ -432,6 +459,7 @@ export default function activate(orca: OrcaWorkerApi): void {
         if (!(await liveMonitor(handle)) && (await autoMoveOn())) state = startInProgress(state, key)
       } else if (ending && !busy) {
         status[handle] = { state: 'done', at: out || now, outcome: null, main: null, inferred: true }
+        if (stuck) orca.log(`chat ${key.slice(0, 8)}: Orca still says working, its terminal has been quiet and idle: taken as done`)
         // The same rule as for a turn Orca reports: news unless it is a loop's run or you are looking at it.
         if (!(await liveMonitor(handle)) && (card.watch || !visible.has(key))) state = markUnseen(state, [key], out || now)
       } else {
@@ -509,8 +537,9 @@ export default function activate(orca: OrcaWorkerApi): void {
       lastError = (err as Error).message.split('\n')[0]
       orca.log(`terminal list failed: ${lastError}`)
     }
-    await seedStatus()
-    return state
+    const seeded = await seedStatus(state)
+    if (seeded !== state) await orca.storage.set(BOARD_KEY, seeded)
+    return seeded
   }
 
   async function mutate(fn: (s: BoardState) => BoardState): Promise<BoardView> {
@@ -931,13 +960,17 @@ export default function activate(orca: OrcaWorkerApi): void {
   })
 
   // Not through `handle`: a click on this machine is not for a board on another one to ask for.
-  orca.panels.handle('keys.click', async ({ warm }) => {
-    if (warm) {
-      warmClicker()
-      return { ok: true }
-    }
-    const ok = await clickInPlace()
-    orca.log(`click in place for the reply box: ${ok ? 'asked' : 'not possible here'}`)
+  let ranOutLoggedAt = 0
+  void orca.storage.get(KEYS_SPOT_KEY).then(setMarkedSpot).catch(() => undefined)
+  orca.panels.handle('keys.click', async ({ op }) => {
+    const ok = await keys(op)
+    if (op === 'mark' && ok) void orca.storage.set(KEYS_SPOT_KEY, markedSpot()).catch(() => undefined)
+    // Not each wait that ran out (a box goes on asking for as long as you are away): one a minute.
+    const ranOut = op === 'move' && !ok && /^(given up|cancelled)/.test(keysWhy())
+    if (ranOut && keysWhy() === 'cancelled') return { ok }
+    if (ranOut && Date.now() - ranOutLoggedAt < 60_000) return { ok }
+    if (ranOut) ranOutLoggedAt = Date.now()
+    if (op !== 'warm' && op !== 'cancel' && (op !== 'mark' || !ok)) orca.log(`mouse for the reply box, ${op}: ${ok ? 'done' : `not done (${keysWhy()})`}`)
     return { ok }
   })
 
@@ -1049,6 +1082,15 @@ export default function activate(orca: OrcaWorkerApi): void {
       if (!key) return
       if (board.cards[key]?.watch) {
         orca.log(`checked chat ${key.slice(0, 8)}: ${prev?.state ?? 'no record'} -> ${state}${visible.has(key) ? ', on screen' : ''}`)
+      }
+      // A turn of a second or two: the listing just made for this "working" already has the turn's
+      // end and marked it. This event is then the stale one, and must not take that mark away
+      // (the end's own event will find nothing new and say nothing).
+      const over = state === 'working' && (await loadStatus())[terminalId]?.state !== 'working'
+      if (over) {
+        if (board.cards[key]?.watch) orca.log(`checked chat ${key.slice(0, 8)}: that turn is over already, its mark stays`)
+        post('board.changed', await view(board))
+        return
       }
       let next =
         state === 'working'
