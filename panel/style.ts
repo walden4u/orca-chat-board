@@ -105,6 +105,12 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
   box-shadow: 0 0 0 1px var(--col), 0 0 10px -2px color-mix(in srgb, var(--col) 70%, transparent);
   background: color-mix(in srgb, var(--col) 14%, var(--orca-background));
 }
+/* An agent at work: the card is tinted blue, also when it is the chat on screen. */
+.card.st-working, .card.st-working.active {
+  background: color-mix(in srgb, #4f8ff7 50%, var(--orca-background));
+  border-color: color-mix(in srgb, #4f8ff7 85%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, #4f8ff7 60%, transparent);
+}
 
 /* Unseen: the agent stopped while you were looking elsewhere (like Orca's yellow tab). */
 .card.unseen {
