@@ -57,6 +57,7 @@ import { folderIsHere, readTextFile, runTool } from './tools.ts'
 import { GOAL_FILE, parseGoalFile } from './goal.ts'
 import { joinPath, orcaRuntimeId } from './cli.ts'
 import { readClaudeSessions, sessionSaved } from './sessions.ts'
+import { clickInPlace, warmClicker } from './keys.ts'
 
 const BOARD_KEY = 'board'
 /** Which run of Orca the board last listed chats from. */
@@ -373,6 +374,8 @@ export default function activate(orca: OrcaWorkerApi): void {
         if (!prev || prev.at < at || (prev.at === at && (prev.main ?? null) !== main)) {
           status[handle] = { state: a.state, at, outcome: a.interrupted ? 'interruption' : null, main }
           changed = true
+          // Worth a line: a state taken from a listing is one its event will no longer report as a change.
+          if (state.cards[tabId]?.watch && prev?.state !== a.state) orca.log(`checked chat ${tabId.slice(0, 8)}: ${prev?.state ?? 'no record'} -> ${a.state}, from a listing`)
           // This listing can be ahead of the event for the same change (events wait their turn
           // behind a refresh). The event then finds nothing new, so the turn's end is noted here.
           if (prev?.state === 'working' && a.state !== 'working') stopped.push({ key: tabId, handle, at })
@@ -564,6 +567,14 @@ export default function activate(orca: OrcaWorkerApi): void {
     return resync()
   })
   orca.settings.onDidChange(() => void resync())
+  // Orca's CLI cannot change a plugin's settings: this turns one of its switches on or off
+  // (`orca plugin dev request local.chat-board setting.set --data='{"key":"followChat","on":false}'`).
+  handle('setting.set', async ({ key, on }) => {
+    const switches = ['followChat', 'pinkWaiting', 'autoCheck', 'restoreChats', 'goalMode', 'autoMoveToInProgress']
+    if (typeof key !== 'string' || !switches.includes(key) || typeof on !== 'boolean') return { ok: false }
+    await orca.settings.set(key, on)
+    return { ok: true }
+  })
 
   // The name of an open chat is its Orca tab's title: rename the tab, then re-list.
   handle('card.update', async (patch) => {
@@ -917,6 +928,17 @@ export default function activate(orca: OrcaWorkerApi): void {
       orca.log(`reopen failed: ${reason}`)
       return { ok: false, error: reason }
     }
+  })
+
+  // Not through `handle`: a click on this machine is not for a board on another one to ask for.
+  orca.panels.handle('keys.click', async ({ warm }) => {
+    if (warm) {
+      warmClicker()
+      return { ok: true }
+    }
+    const ok = await clickInPlace()
+    orca.log(`click in place for the reply box: ${ok ? 'asked' : 'not possible here'}`)
+    return { ok }
   })
 
   handle('chat.focus', async ({ key }) => {

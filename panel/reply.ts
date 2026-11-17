@@ -51,7 +51,28 @@ export type ReplyHandlers = {
    * You are at this box: at once for one you opened, at your first click for one that opened by
    * itself. Orca may move the keyboard while it answers; the field takes it back afterwards.
    */
-  onEngaged: () => Promise<void>
+  onEngaged: () => Promise<boolean>
+  /** After Orca was asked to show the chat: where the keyboard ended up, for the log. */
+  onKeys: (what: string) => void
+  /** Asks for a mouse click where the pointer is (see `takeBack`). */
+  onClick: () => Promise<unknown>
+}
+
+/** Whether the pointer is over this frame: a click made where it is must land here. */
+let pointerIn = false
+document.addEventListener('pointermove', () => (pointerIn = true), true)
+document.addEventListener('pointerdown', () => (pointerIn = true), true)
+document.documentElement.addEventListener('mouseleave', () => (pointerIn = false))
+
+/**
+ * Showing a chat here means Orca switches to its terminal tab, which takes the keyboard from this
+ * panel. (Not so on the board of another machine, which shows the chat in a browser tab.)
+ */
+export const SHOWING_TAKES_KEYS = true
+
+/** Whether a click made where the pointer is would land on this panel. */
+export function pointerOverPanel(): boolean {
+  return pointerIn
 }
 
 const PICTURE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
@@ -616,12 +637,36 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   showJudge(target.judge, target.tally)
   document.body.append(backdrop)
   if (!readOnly && !target.auto) setTimeout(() => input.focus(), 0)
+  // Orca showed the chat's tab and gave its terminal the keys. This frame cannot have them back
+  // by asking (tried for 3 s after a click: never), only by a click in it. So one is made for
+  // you where the pointer already is, over this box, and a sheet over the box takes it, so that
+  // it presses none of the buttons.
+  const hasKeys = () => document.activeElement === input && document.hasFocus()
+  const takeBack = () => {
+    if (!open || readOnly || busy) return
+    if (hasKeys()) return handlers.onKeys('kept')
+    if (!pointerIn) return handlers.onKeys('with the terminal, pointer elsewhere')
+    const sheet = node('div', 'reply-sheet')
+    let clicked = false
+    sheet.addEventListener('click', () => {
+      clicked = true
+      sheet.remove()
+      if (open) input.focus()
+    })
+    document.body.append(sheet)
+    setTimeout(() => {
+      sheet.remove()
+      if (open) handlers.onKeys(hasKeys() ? 'back by a click' : clicked ? 'clicked, still with the terminal' : 'with the terminal, no click came')
+    }, 1500)
+    void handlers.onClick()
+  }
   let engaged = false
   const engage = () => {
     if (engaged) return
     engaged = true
-    void handlers.onEngaged().then(() => {
+    void handlers.onEngaged().then((moved) => {
       if (open && !readOnly && !busy && document.activeElement !== input) input.focus()
+      if (moved) setTimeout(takeBack, 150)
     })
   }
   if (target.auto) dialog.addEventListener('pointerdown', engage, true)

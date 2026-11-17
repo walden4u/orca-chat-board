@@ -221,6 +221,8 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .preview-you .preview-text { color: var(--orca-muted-foreground); max-height: 8.7em; overflow: hidden; }
 .preview-empty { color: var(--orca-muted-foreground); font-style: italic; }
 
+/* Takes the click made to bring the keyboard back to the reply box, so it presses no button. */
+.reply-sheet { position: fixed; inset: 0; z-index: 200; background: transparent; }
 .reply-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; padding: 8px;
   background: color-mix(in srgb, var(--orca-background) 70%, transparent); }
 .reply { flex: 1; min-width: 0; max-width: 760px; margin: 0 auto; display: flex; flex-direction: column;

@@ -4,6 +4,7 @@ import * as main from './worker.ts'
 import { setOrcaRunner } from './cli.ts'
 import { setToolRunner } from './tools.ts'
 import { sessionsOf, setSessionCheck, setSessionsReader } from './sessions.ts'
+import { setClicker } from './keys.ts'
 import { activeTabsByWorktree, cleanTitle, defaultColumns, emptyBoard, mergeChats, moveCard, setColumns, type LiveTerminal } from './board.ts'
 import type { BoardView, CardView } from './protocol.ts'
 import { looksBusy, suggestionOf } from './screen.ts'
@@ -53,6 +54,9 @@ const host = (storage: Record<string, unknown> = {}, focusedHandles: () => strin
 // The sessions of the tabs are read whatever the settings: never from this machine's own Orca.
 const noSessions = async () => ({})
 setSessionsReader(noSessions)
+// A test never presses the mouse of the machine it runs on.
+let clicks = 0
+setClicker(async () => (clicks++, true))
 
 afterEach(() => {
   setOrcaRunner(null)
@@ -177,6 +181,17 @@ test('focus switches to the live handle', async () => {
   await worker.request('board.get', { refresh: true })
   assert.deepEqual(await worker.request('chat.focus', { key: 'tab1' }), { ok: true, error: null })
   assert.deepEqual(calls.at(-1), ['terminal', 'switch', '--terminal', 'term_1', '--json'])
+  await worker.deactivate()
+})
+
+test('the click for the reply box is asked of the machine only when it is not just a warm-up', async () => {
+  fakeCli(() => [term(1)])
+  const worker = await mountWorker(main, { host: host() })
+  const before = clicks
+  assert.deepEqual(await worker.request('keys.click', { warm: true }), { ok: true })
+  assert.equal(clicks, before)
+  assert.deepEqual(await worker.request('keys.click', {}), { ok: true })
+  assert.equal(clicks, before + 1)
   await worker.deactivate()
 })
 

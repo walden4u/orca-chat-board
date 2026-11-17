@@ -12,8 +12,10 @@ declare module 'node:child_process' {
       windowsVerbatimArguments?: boolean
     },
     callback: (error: (Error & { code?: unknown }) | null, stdout: string, stderr: string) => void
-  ): { stdin?: { end(data?: string): void } | null }
+  ): { stdin?: { end(data?: string): void; write(data: string): boolean } | null }
 }
+
+declare function btoa(data: string): string
 
 declare module 'node:fs' {
   export function existsSync(path: string): boolean
