@@ -305,7 +305,7 @@ function answerDue(c: CardView): boolean {
 function isWaiting(c: CardView): boolean {
   if (!c.watch || c.closed || !c.unseenAt || c.unseenAt === readHere.get(c.key)) return false
   const later = putOff.get(c.key)
-  if (later === undefined || c.unseenAt > later || Date.now() - later >= QUEUE_HOLD_MS) return true
+  if (later === undefined || c.unseenAt > later || Date.now() - later >= PUT_OFF_MS) return true
   return (view?.cards ?? []).some((x) => x.key !== c.key && x.watch && !x.closed && (x.unseenAt ?? 0) > later)
 }
 
@@ -333,6 +333,8 @@ const readHere = new Map<string, number>()
 const endedOpen = new Set<string>()
 /** When a box was left with its ended turn unanswered: the chat waits a while before it opens again. */
 const putOff = new Map<string, number>()
+/** That while (2 minutes at first, "too long" said on 2026-11-18). */
+const PUT_OFF_MS = 60_000
 
 /** Seen: the box was answered, or you went to the chat itself. */
 function markSeen(key: string): void {
@@ -349,7 +351,7 @@ function markSeen(key: string): void {
 /**
  * A box left without an answer to the turn that ended while it was open (closed, or walked away
  * from): the chat stays unseen and opens again by itself, though not at once (Escape would be of
- * no use): once another checked chat finishes, or after a while, as after ↗.
+ * no use): once another checked chat finishes, or after a minute (`PUT_OFF_MS`).
  */
 function leftUnanswered(key: string): void {
   if (!endedOpen.delete(key)) return
