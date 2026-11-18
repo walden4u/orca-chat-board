@@ -58,6 +58,29 @@ export function openDoor(handlers: Map<string, RemoteHandler>, token: string): P
       res.writeHead(status, { 'content-type': 'application/json' })
       res.end(JSON.stringify(body))
     }
+    // Alt+K pressed in the server's web client, shown in a browser tab on the other machine: that
+    // page takes the key before Orca sees it, so it posts it here (a plain no-cors fetch, which can
+    // carry no header: the token is in the body) and the boards listening hear `keys.bring`.
+    if (req.method === 'POST' && req.url === '/key') {
+      const chunks: Uint8Array[] = []
+      let size = 0
+      req.on('data', (chunk: Uint8Array) => {
+        size += chunk.length
+        if (size > 4096) req.destroy()
+        else chunks.push(chunk)
+      })
+      req.on('end', () => {
+        try {
+          const { token: given, from } = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { token?: unknown; from?: unknown }
+          if (typeof given === 'string' && sameToken(given, token)) send(`data: ${JSON.stringify({ name: 'keys.bring', payload: { from: String(from ?? '') } })}\n\n`)
+        } catch {
+          // Not a key from the page: nothing to tell.
+        }
+        res.writeHead(204, { 'access-control-allow-origin': '*' })
+        res.end()
+      })
+      return
+    }
     const given = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? ''
     if (!sameToken(given, token)) return answer(401, { ok: false, error: 'unauthorized' })
     if (req.method === 'GET' && req.url === '/events') {
