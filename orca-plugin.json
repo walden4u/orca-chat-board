@@ -44,6 +44,12 @@
         "ui": "html"
       }
     ],
+    "commands": [
+      {
+        "id": "board.keys",
+        "title": "Chat Board (원격): 키보드를 보드로 가져오기"
+      }
+    ],
     "events": [
       {
         "on": "agent.status.changed"

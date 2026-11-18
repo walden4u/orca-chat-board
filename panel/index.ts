@@ -7,7 +7,7 @@ import { STATUS_ICON, type StatusKind } from './icons.ts'
 import { locale, setLanguage, t } from './i18n.ts'
 import { isStale } from '../src/monitor.ts'
 import { heldByKeys, hidePreview, schedulePreview } from './preview.ts'
-import { closeReply, openReply, replyKey, setReplyMouse, type MouseOp, setReplyChat, setReplyJudge, setReplyWaiting } from './reply.ts'
+import { bringKeys, closeReply, focusReply, openReply, replyKey, setReplyMouse, type MouseOp, setReplyChat, setReplyJudge, setReplyWaiting } from './reply.ts'
 
 const INTERRUPTED = new Set(['interruption', 'failure', 'cancellation'])
 
@@ -1172,6 +1172,18 @@ function boot(): void {
   document.addEventListener('dragend', released)
 
   orca.plugin.on('board.changed', (next) => setView(next as BoardView))
+  // Your shortcut for the board: the keys come back from a terminal, to the open reply box, or
+  // else to the card they were on (or the first chat that waits for your answer).
+  orca.plugin.on('keys.bring', () => {
+    void bringKeys(() => {
+      if (focusReply()) return
+      const cards = [...document.querySelectorAll<HTMLElement>('.board .card')]
+      const card = cards.find((c) => c.dataset.key === pickedKey) ?? cards.find((c) => c.classList.contains('answer-due')) ?? cards[0]
+      if (!card) return
+      pickedKey = card.dataset.key ?? null
+      card.focus()
+    }).then((what) => trace(`keys by the shortcut: ${what}`))
+  })
   orca.on('agent.status.changed', ({ terminalId, state, receivedAt, mainAgent }) => {
     const card = view?.cards.find((c) => c.handle && c.handle === terminalId)
     const outcome = mainAgent?.outcome ?? null

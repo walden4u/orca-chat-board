@@ -25,6 +25,12 @@ export type ScreenMenu = {
   at: number
   /** The list is numbered 1, 2, 3…: pressing a number picks at once. Otherwise arrows and Enter. */
   numbered: boolean
+  /**
+   * In a question where several options may be ticked (a number ticks one), the option at this
+   * index is the screen's "Next" row, which has no number: it goes on to the next question. Put
+   * last, so that every other option keeps its number.
+   */
+  next?: number
 }
 
 // A permission request has no word about Enter under it, only "Esc to cancel · Tab to amend".
@@ -56,7 +62,14 @@ export function menuOf(rows: readonly string[]): ScreenMenu | null {
       break
     }
   }
-  if (foot < 0) return null
+  let review = false
+  if (foot < 0) {
+    // The review of the answers to the agent's questions ends with its list ("❯ 1. Submit
+    // answers / 2. Cancel") and no word about Enter under it (Claude Code 2.1.327, 2026-11-18).
+    if (!all.some((r) => /^\s*Review your answers\s*$/.test(r))) return null
+    foot = all.length
+    review = true
+  }
   let pointed = -1
   for (let i = foot - 1; i >= Math.max(0, foot - 40); i--) {
     if (/^\s*❯\s+\S/.test(all[i]!)) {
@@ -67,8 +80,19 @@ export function menuOf(rows: readonly string[]): ScreenMenu | null {
   if (pointed < 0) return null
   const label = (text: string) => text.split(/\s{2,}/)[0]!.trim()
   const numberOf = (row: string) => /^\s*(?:❯\s+)?(\d+)\.\s+(\S.*)$/.exec(row)
+  const NEXT_ROW = /^\s*(?:❯\s+)?Next\s*$/
+  // The pointer on the "Next" row of a question where several may be ticked: the options are
+  // the numbered rows above it, counted from the nearest one.
+  const onNext = NEXT_ROW.test(all[pointed]!)
+  if (onNext) {
+    let i = pointed - 1
+    while (i >= Math.max(0, pointed - 30) && !numberOf(all[i]!)) i--
+    if (i < Math.max(0, pointed - 30)) return null
+    pointed = i
+  }
   const options: string[] = []
   let at = 0
+  let next: number | undefined
   let first = pointed
   const own = numberOf(all[pointed]!)
   if (own) {
@@ -98,6 +122,15 @@ export function menuOf(rows: readonly string[]): ScreenMenu | null {
     }
     for (let k = 1; found.has(k); k++) options.push(found.get(k)!)
     at = n - 1
+    // A question where several may be ticked ("[ ] Apple", "[✔] Banana") has a "Next" row.
+    const ticks = options.some((o) => /^\[[ ✔✓x]\]\s/u.test(o))
+    if (ticks && all.slice(first, foot).some((r) => NEXT_ROW.test(r))) {
+      options.push('Next')
+      next = options.length - 1
+      if (onNext) at = next
+    } else if (onNext) {
+      return null
+    }
   } else {
     // Not numbered: the rows right above and below whose text starts where the pointed one's does.
     const col = all[pointed]!.indexOf('❯') + 2
@@ -114,12 +147,13 @@ export function menuOf(rows: readonly string[]): ScreenMenu | null {
   for (let i = first - 1; i >= 0 && asked.length < MAX_QUESTION_ROWS; i--) {
     const row = all[i]!
     if (RULE.test(row) && row.trim()) break
-    if (/^\s*[❯●⎿✻✽✢]/u.test(row)) break
+    // (The review lists each question with ●, as the agent's own lines start: it keeps them.)
+    if (/^\s*[❯⎿✻✽✢]/u.test(row) || (!review && /^\s*●/u.test(row))) break
     asked.unshift(SOFT_RULE.test(row) ? '' : row.trim())
   }
   while (asked.length && !asked[0]) asked.shift()
   while (asked.length && !asked[asked.length - 1]) asked.pop()
-  return { question: asked.join('\n').replace(/\n{3,}/g, '\n\n').slice(0, 1500), options, at, numbered: !!own }
+  return { question: asked.join('\n').replace(/\n{3,}/g, '\n\n').slice(0, 1500), options, at, numbered: !!own, ...(next === undefined ? {} : { next }) }
 }
 
 /**
@@ -128,6 +162,8 @@ export function menuOf(rows: readonly string[]): ScreenMenu | null {
  * on its own. Both seen to work in Claude Code 2.1.327 (2026-11-18).
  */
 export function keysFor(menu: ScreenMenu, index: number): string[] {
+  // "Next" in a question where several may be ticked: the right arrow goes on to the next question.
+  if (index === menu.next) return ['\x1b[C']
   if (menu.numbered) return [String(index + 1)]
   const steps = index - menu.at
   const arrows = (steps > 0 ? '\x1b[B' : '\x1b[A').repeat(Math.abs(steps))

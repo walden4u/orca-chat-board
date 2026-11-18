@@ -252,6 +252,13 @@ export default function activate(orca: OrcaWorkerApi): void {
     return { ok }
   }) as never)
 
+  // The keyboard from a terminal or the browser tab back to this board, with a shortcut you give
+  // this command in Orca (`~/.orca/keybindings.json`: "plugin:local.chat-board-remote/board.keys"),
+  // or from the command palette. This machine's panel does it (see `bringKeys`), never the server's.
+  orca.commands.register('board.keys', () => {
+    orca.panels.post('keys.bring' as never, null as never)
+  })
+
   // Whether the server answers directly: the panel then sends pictures as they are.
   orca.panels.handle('link.direct' as never, (() => isDirect()) as never)
 

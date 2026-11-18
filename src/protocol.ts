@@ -238,5 +238,7 @@ declare module 'orca' {
   }
   interface PluginPanelEvents {
     'board.changed': BoardView
+    /** Your shortcut for the board (the command `board.keys`): the panel takes the keyboard back. Only on this machine. */
+    'keys.bring': null
   }
 }
