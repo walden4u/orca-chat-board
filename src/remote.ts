@@ -71,9 +71,10 @@ export function openDoor(handlers: Map<string, RemoteHandler>, token: string): P
       })
       req.on('end', () => {
         try {
-          // `what`: 'key' (Alt+K), or 'mark' (you clicked in a terminal there: where, for later).
+          // `what`: 'key' (Alt+K), 'mark' (you clicked in a terminal there: where, for later), or a
+          // word of what the page did, for the other machine's log.
           const { token: given, from, what } = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { token?: unknown; from?: unknown; what?: unknown }
-          const payload = { from: String(from ?? ''), what: what === 'mark' ? 'mark' : 'key' }
+          const payload = { from: String(from ?? ''), what: typeof what === 'string' && /^[a-z-]{1,24}$/.test(what) ? what : 'key' }
           if (typeof given === 'string' && sameToken(given, token)) send(`data: ${JSON.stringify({ name: 'keys.bring', payload })}\n\n`)
         } catch {
           // Not a key from the page: nothing to tell.
