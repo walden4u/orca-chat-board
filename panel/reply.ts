@@ -495,6 +495,15 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     // Also in the middle of a Korean syllable: there the key arrives as `Process`, and only `code`
     // says it was Escape. What you typed is kept for this chat either way.
     if ((e.key === 'Escape' || e.code === 'Escape') && !busy) return leave(handlers.onClosed)
+    // Alt+Enter shows the chat in its terminal, as a click on the title does: what you wrote stays,
+    // nothing is sent (asked for on 2026-11-18). Wherever the keys are in the box: in its field,
+    // on one of its buttons, or in a box whose field cannot be written in (a permission request).
+    if ((e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter') && e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!e.repeat) engage('enter')
+      return
+    }
     // Where the field cannot be written in (a permission request), a number picks from the list
     // on the chat's screen at once. In a field you can write in, a number may be the start of a
     // sentence ("1번으로…"): there it is the number and then Enter (see the field's own keys).
@@ -753,13 +762,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       advise()
       return
     }
-    // Alt+Enter shows the chat in its terminal, as a click on the title does: what you wrote stays,
-    // nothing is sent (asked for on 2026-11-18, in place of Enter in the empty field).
-    if (e.key === 'Enter' && e.altKey && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault()
-      if (!e.repeat) engage('enter')
-      return
-    }
+    // (Alt+Enter is the box's own key, in `onKey`: it never reaches here.)
     // Enter sends, Shift+Enter adds a line. While an IME composes (Korean, Japanese…), Enter
     // belongs to the IME: it confirms the word and must not send (keyCode 229 in older engines).
     // A held key is not a decision: one Enter, one message.
@@ -885,11 +888,21 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     }, 0)
   }
   let engaged = false
-  // Pressing Enter for it, or clicking its title, does it again, whatever was done before.
+  /** Showing the chat takes a second or two on the board of another machine: said, so you do not press again. */
+  const SHOWING_NOTE_MS = 300
+  // Pressing Alt+Enter for it, or clicking its title, does it again, whatever was done before.
   const engage = (how: Engaged = 'open') => {
     if (engaged && how !== 'enter' && how !== 'title') return
     engaged = true
-    void handlers.onEngaged(how).then((moved) => {
+    let answered = false
+    const note = setTimeout(() => {
+      if (open && !answered && !status.textContent) status.textContent = t.showingChat
+    }, SHOWING_NOTE_MS)
+    void handlers.onEngaged(how).finally(() => {
+      answered = true
+      clearTimeout(note)
+      if (status.textContent === t.showingChat) status.textContent = ''
+    }).then((moved) => {
       if (open && !readOnly && !busy && document.activeElement !== input) input.focus()
       if (moved) setTimeout(() => void takeBack(false, true), 150)
       // The keys can leave again in the moments after (a chat shown just before this one arrives
