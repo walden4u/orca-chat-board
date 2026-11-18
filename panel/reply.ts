@@ -135,10 +135,15 @@ export function pointerOverPanel(): boolean {
  * whole panel takes the click, so that it presses nothing; `land` then puts the keys where they
  * belong. Says what happened, for the log.
  */
+let bringing = false
 export async function bringKeys(land: () => void): Promise<string> {
+  // Pressed twice in a row: the second would move and put back the pointer under the first.
+  if (bringing) return 'already on it'
+  bringing = true
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
   let clicked = false
   let moved = false
+  let unfelt = false
   const sheet = node('div', 'reply-sheet')
   sheet.addEventListener('click', () => {
     clicked = true
@@ -150,16 +155,20 @@ export async function bringKeys(land: () => void): Promise<string> {
     if (!pointerIn) {
       moved = await mouse('move-now')
       if (!moved) return 'pointer elsewhere and not brought here'
-      await pause(150)
-      if (!pointerIn) return 'the pointer did not land on the panel'
+      for (let i = 0; i < 6 && !pointerIn; i++) await pause(100)
+      // From the chat's browser tab (b9, 2026-11-18) the panel never felt the pointer arrive, yet
+      // it is on the spot of your last click here, and the helper clicks only over Orca.
+      unfelt = !pointerIn
     }
     await mouse('click')
     await pause(250)
   } finally {
     sheet.remove()
     if (moved) void mouse('restore')
+    bringing = false
   }
-  return clicked ? `back by a click${moved ? ', the pointer put back' : ''}` : 'clicked, but not here'
+  const how = `${moved ? ', the pointer put back' : ''}${unfelt ? ', its arrival not felt here' : ''}`
+  return clicked ? `back by a click${how}` : `clicked, but not here${how}`
 }
 
 /** Puts the keys in the open reply box (its field, or the box itself when it cannot be written in). False with no box. */
