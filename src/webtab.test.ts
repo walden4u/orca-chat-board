@@ -21,7 +21,7 @@ test('the script run in the web client is one expression that parses, whatever t
   }
 })
 
-test('the key hook posts Alt+K once, only Alt+K, and swallows it; run again it only moves where to post', async () => {
+test("the key hook posts Ctrl+' once, only Ctrl+', and swallows it; run again it only moves where to post", async () => {
   const { keyHook } = await import('./webtab.ts')
   const listeners: ((e: unknown) => void)[] = []
   const marks: ((e: unknown) => void)[] = []
@@ -47,14 +47,15 @@ test('the key hook posts Alt+K once, only Alt+K, and swallows it; run again it o
   assert.equal(marks.length, 1)
   const key = (o: Record<string, unknown>): { stopped: boolean } => {
     const seen = { stopped: false }
-    listeners[0]({ altKey: false, ctrlKey: false, shiftKey: false, metaKey: false, repeat: false, code: 'KeyK', preventDefault() {}, stopImmediatePropagation: () => (seen.stopped = true), ...o })
+    listeners[0]({ altKey: false, ctrlKey: false, shiftKey: false, metaKey: false, repeat: false, code: 'Quote', preventDefault() {}, stopImmediatePropagation: () => (seen.stopped = true), ...o })
     return seen
   }
   assert.equal(key({}).stopped, false)
-  assert.equal(key({ altKey: true, code: 'KeyJ' }).stopped, false)
-  assert.equal(key({ altKey: true, shiftKey: true }).stopped, false)
-  assert.equal(key({ altKey: true }).stopped, true)
-  assert.equal(key({ altKey: true, repeat: true }).stopped, true)
+  assert.equal(key({ ctrlKey: true, code: 'Semicolon' }).stopped, false)
+  assert.equal(key({ ctrlKey: true, shiftKey: true }).stopped, false)
+  assert.equal(key({ ctrlKey: true }).stopped, true)
+  assert.equal(key({ ctrlKey: true, repeat: true }).stopped, true)
+  assert.equal(key({ altKey: true, code: 'KeyK' }).stopped, false, 'Alt+K is no longer it')
   assert.equal(posts.length, 1)
   assert.equal(posts[0][0], 'http://b:4927/key')
   assert.equal(posts[0][1].body, body)

@@ -83,11 +83,11 @@ export function keyHook(url: string, token: string, from: string): string {
     // The first version of this hook (its listener cannot be taken out) is silenced.
     // Earlier versions of this hook (their listeners cannot be taken out) are silenced: change the
     // name whenever the listeners change, or a page that has the old ones never gets the new.
-    'for (const old of ["__chatBoardKeys", "__chatBoardKeys2", "__chatBoardKeys3", "__chatBoardKeys4"]) if (window[old]) window[old].url = "";',
-    'const kb = window.__chatBoardKeys5 || (window.__chatBoardKeys5 = {});',
+    'for (const old of ["__chatBoardKeys", "__chatBoardKeys2", "__chatBoardKeys3", "__chatBoardKeys4", "__chatBoardKeys5"]) if (window[old]) window[old].url = "";',
+    'const kb = window.__chatBoardKeys6 || (window.__chatBoardKeys6 = {});',
     'kb.post = (what) => fetch(kb.url, { method: "POST", mode: "no-cors", body: JSON.stringify({ token: kb.token, from: kb.from, what }) }).catch(() => {});',
     'if (!kb.on) { kb.on = true; window.addEventListener("keydown", (e) => {',
-    '  if (!kb.url || !e.altKey || e.ctrlKey || e.shiftKey || e.metaKey || e.code !== "KeyK") return;',
+    '  if (!kb.url || !e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || e.code !== "Quote") return;',
     '  e.preventDefault(); e.stopImmediatePropagation();',
     // One press can arrive twice (seen on b9, 5 to 15 ms apart): posted once.
     '  if (e.repeat || Date.now() - (kb.keyAt || 0) < 400) return;',

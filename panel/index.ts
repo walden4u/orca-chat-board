@@ -261,35 +261,6 @@ async function load(refresh: boolean): Promise<void> {
   setView(await request<BoardView>('board.get', { refresh, locale }))}
 
 /**
- * For the log, for 3 s after Alt+K brought the keys here: what you typed and where it went
- * (2026-11-18, b9: "the cursor comes, but typing does not work well"). To be taken out once known.
- */
-function watchKeysAfter(): void {
-  const keys: string[] = []
-  let inputs = 0
-  let composing = 0
-  const at = () => {
-    const a = document.activeElement as HTMLElement | null
-    return a ? `${a.tagName}${a.className ? '.' + String(a.className).split(' ')[0] : ''}` : 'none'
-  }
-  const first = at()
-  const onDown = (e: KeyboardEvent) => {
-    if (keys.length < 12) keys.push(`${e.key === 'Process' ? 'P' : e.key.length === 1 ? 'c' : e.key}${e.isComposing ? '*' : ''}`)
-  }
-  const onInput = () => inputs++
-  const onCompose = () => composing++
-  document.addEventListener('keydown', onDown, true)
-  document.addEventListener('input', onInput, true)
-  document.addEventListener('compositionstart', onCompose, true)
-  setTimeout(() => {
-    document.removeEventListener('keydown', onDown, true)
-    document.removeEventListener('input', onInput, true)
-    document.removeEventListener('compositionstart', onCompose, true)
-    trace(`after the shortcut, 3 s: keys here [${keys.join(' ')}], ${inputs} inputs, ${composing} compositions, keys at ${first} then ${at()}, focus ${document.hasFocus() ? 'T' : 'F'}`)
-  }, 3000)
-}
-
-/**
  * The chat this board last showed in the browser tab here. The server's own idea of the tab on
  * screen (`active`) is its window's, not this machine's: this is what Alt+K goes by.
  */
@@ -1219,7 +1190,8 @@ function boot(): void {
   document.addEventListener(
     'keydown',
     (e) => {
-      if (!e.altKey || e.ctrlKey || e.shiftKey || e.metaKey || e.code !== 'KeyK') return
+      // Ctrl+' (Alt+K until 2026-11-18, changed at your word).
+      if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || e.code !== 'Quote') return
       e.preventDefault()
       e.stopImmediatePropagation()
       // Pressed again while the chat is still being shown (a second or two here): once is enough.
@@ -1278,7 +1250,6 @@ function boot(): void {
       card.focus()
     }).then((what) => {
       trace(`keys by the shortcut: ${what}`)
-      watchKeysAfter()
     })
   })
   orca.on('agent.status.changed', ({ terminalId, state, receivedAt, mainAgent }) => {
