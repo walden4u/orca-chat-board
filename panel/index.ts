@@ -1193,6 +1193,9 @@ function boot(): void {
       handedAt = Date.now()
       // The box stays as it is, but no longer reaches for the keys once its chat has them.
       letKeysGo()
+      // Leaving: the field lets go, and the input method with it (the box stays as it is). On the
+      // board of the other machine the Korean input method otherwise stayed with the field left.
+      ;(document.activeElement as HTMLElement | null)?.blur()
       void focusChat(c).then(() => trace(`keys to the terminal by the shortcut: ${c.key.slice(0, 8)}`))
     },
     true
