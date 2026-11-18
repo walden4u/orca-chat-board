@@ -1182,7 +1182,8 @@ function boot(): void {
   document.addEventListener(
     'keydown',
     (e) => {
-      if (!e.altKey || e.ctrlKey || e.shiftKey || e.metaKey || e.code !== 'KeyK') return
+      // Ctrl+' (Alt+K until 2026-11-18, changed at your word).
+      if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || e.code !== 'Quote') return
       e.preventDefault()
       e.stopImmediatePropagation()
       if (e.repeat) return
