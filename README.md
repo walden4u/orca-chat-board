@@ -71,6 +71,23 @@ orca plugin dev request local.chat-board remote.renew
 | 서버 …에 Chat Board가 개발 플러그인으로 로드돼 있지 않습니다 | 서버에서 `orca plugin list` |
 | 브라우저 탭의 Orca 웹 화면이 아직 서버와 연결되지 않았습니다 | 설치 5번 |
 | 웹 화면의 목록에 이 대화의 워크스페이스가 없습니다 / 탭이 없습니다 | Orca가 업데이트되어 웹 화면의 구조가 바뀌었을 수 있습니다(`src/webtab.ts`) |
+| Enter를 눌러도 대화가 안 뜨고 시스템 크롬 창이 열렸다 닫힘, 또는 띄우는 데 3초 넘게 걸림 | 아래 "agent-browser 설정" |
+
+서버 쪽 로그(`orca plugin logs local.chat-board`)에 이 PC가 대화를 띄운 결과가 `panel: remote: chat … shown here in … ms (find/page/switch …)` 또는 `not shown here: …`로 남습니다. 평소에는 1~2초입니다.
+
+### agent-browser 설정 (2026-11-18)
+
+Orca는 안의 브라우저 탭을 `agent-browser-win32-x64.exe`라는 도우미로 조작하고, 이 도우미는 사용자의 agent-browser 설정 `%USERPROFILE%\.agent-browser\config.json`을 그대로 읽습니다. 이 PC에서 agent-browser를 직접 쓰려고 `headed`·`profile` 같은 설정을 이 파일에 두면 두 가지 일이 생깁니다.
+
+- 브라우저 탭을 다루는 명령마다 느려집니다(실제로 띄우기 한 번이 2.8~6.8초, 이 파일을 치우자 1.1~1.7초).
+- Orca를 다시 켜면 도우미의 예전 세션이 남는데, Orca가 그것을 닫는 동안 도우미가 설정대로 크롬을 띄우느라 시간을 넘겨 실패합니다. 로그에는 "Could not reset stale helper session orca-tab-…"가 남고, 크롬 창이 열렸다 닫히기를 되풀이합니다. 이 플러그인은 이 오류를 보면 그 세션의 도우미를 끝내고 파일을 지운 뒤 한 번 다시 띄웁니다(`src/stale.ts`).
+
+그래서 이 파일은 두지 마세요. 그 설정이 필요하면 다른 이름으로 두고, agent-browser를 직접 실행할 때만 `--config <경로>`로 지정합니다. `AGENT_BROWSER_CONFIG` 환경 변수는 Orca의 도우미도 물려받으므로 쓰면 안 됩니다. 손으로 정리할 때는 PowerShell에서:
+
+```powershell
+Get-Process agent-browser* -ErrorAction SilentlyContinue | Stop-Process -Force
+Remove-Item "$env:USERPROFILE\.agent-browser\orca-tab-*" -Force -ErrorAction SilentlyContinue
+```
 
 ## 알아 둘 점
 
