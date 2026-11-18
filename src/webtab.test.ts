@@ -33,6 +33,9 @@ test('the key hook posts Alt+K once, only Alt+K, and swallows it; run again it o
     closest(): unknown {
       return this.inTerminal ? this : null
     }
+    querySelector(): null {
+      return null
+    }
   }
   const run = (hook: string): void => new Function('window', 'fetch', 'Element', hook)(win, fetch, Element)
   const body = JSON.stringify({ token: 't"k', from: 'me', what: 'key' })

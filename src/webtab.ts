@@ -87,12 +87,20 @@ export function keyHook(url: string, token: string, from: string): string {
     'if (!kb.on) { kb.on = true; window.addEventListener("keydown", (e) => {',
     '  if (!kb.url || !e.altKey || e.ctrlKey || e.shiftKey || e.metaKey || e.code !== "KeyK") return;',
     '  e.preventDefault(); e.stopImmediatePropagation();',
-    '  if (!e.repeat) kb.post("key");',
+    // One press can arrive twice (seen on b9, 5 to 15 ms apart): posted once.
+    '  if (e.repeat || Date.now() - (kb.keyAt || 0) < 400) return;',
+    '  kb.keyAt = Date.now(); kb.post("key");',
     '}, true);',
     // A click of yours in a terminal here is where a click can be made for you later (Alt+K on
     // the board): Orca does not hand the keys to this page when it is on screen already.
     '  window.addEventListener("pointerdown", (e) => {',
-    '    if (!kb.url || !e.isTrusted || e.button !== 0 || !(e.target instanceof Element) || !e.target.closest(".xterm")) return;',
+    '    if (!kb.url || !e.isTrusted || e.button !== 0 || !(e.target instanceof Element)) return;',
+    '    const term = e.target.closest(".xterm");',
+    '    if (!term) return;',
+    // That click is to type in the terminal: its field gets the keys, should the page not have
+    // put them there (seen on b9: Alt+K reached the page after such a click, the letters did not
+    // reach the terminal).
+    '    setTimeout(() => { const ta = term.querySelector(".xterm-helper-textarea"); if (ta && document.activeElement !== ta) { ta.focus({ preventScroll: true }); kb.post(document.activeElement === ta ? "focus-fixed" : "focus-not-fixed"); } }, 80);',
     '    if (Date.now() - (kb.markedAt || 0) < 2000) return;',
     '    kb.markedAt = Date.now(); kb.post("mark");',
     '  }, true); }',

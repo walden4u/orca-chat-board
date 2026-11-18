@@ -318,6 +318,8 @@ export default function activate(orca: OrcaWorkerApi): void {
         })
         return
       }
+      // What the page did about the keys, for the log.
+      if (said.what !== 'key') return tellServer(`chat screen: ${String(said.what)}`)
       tellServer('Alt+K in the web tab')
       orca.panels.post('keys.bring' as never, null as never)
       return
