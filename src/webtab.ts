@@ -10,8 +10,9 @@ export type WebTabResult = 'ok' | 'not-paired' | 'not-ready' | 'no-workspace' | 
  * The script run in the web client. Workspaces are rows of a virtual list, found by their id
  * (scrolling the list when the row is not drawn); tabs carry the server's tab id.
  */
-export function steerScript(worktreeId: string, tabId: string): string {
+export function steerScript(worktreeId: string, tabId: string, hook = ''): string {
   const body = [
+    hook,
     'const norm = (s) => String(s).replace(/\\\\/g, "/").toLowerCase();',
     'const sleep = (ms) => new Promise((r) => setTimeout(r, ms));',
     `const want = norm(${JSON.stringify(worktreeId)});`,
@@ -68,6 +69,43 @@ export function steerScript(worktreeId: string, tabId: string): string {
   return `(async () => { ${body} })()`
 }
 
+/**
+ * Script lines that make the web client page post Alt+K to the server's door (`url`, with `body`
+ * as it is): a key pressed in that page never reaches Orca, so Orca's shortcut for `board.keys`
+ * does nothing there. Run again with each chat shown, it only refreshes where to post.
+ */
+export function keyHook(url: string, body: string): string {
+  return [
+    'const kb = window.__chatBoardKeys || (window.__chatBoardKeys = {});',
+    'if (!kb.on) { kb.on = true; window.addEventListener("keydown", (e) => {',
+    '  if (!kb.url || !e.altKey || e.ctrlKey || e.shiftKey || e.metaKey || e.code !== "KeyK") return;',
+    '  e.preventDefault(); e.stopImmediatePropagation();',
+    '  if (!e.repeat) fetch(kb.url, { method: "POST", mode: "no-cors", body: kb.body }).catch(() => {});',
+    '}, true); }',
+    `kb.url = ${JSON.stringify(url)}; kb.body = ${JSON.stringify(body)};`
+  ].join(' ')
+}
+
+let hook = ''
+/** What `keyHook` lines each script run in the page starts with ('' for none). */
+export function setKeyHook(next: string): void {
+  hook = next
+}
+
+/** Puts the key hook into the web client page now, if its browser tab is open; never makes one. */
+export async function hookWebTab(webUrl: string): Promise<boolean> {
+  if (!hook) return false
+  if (!page || !home) {
+    const worktree = await localWorktreeId()
+    const origin = new URL(webUrl).origin
+    const open = (await listBrowserTabs(worktree)).find((t) => t.url.startsWith(origin))
+    if (!open) return false
+    page = open.page
+    home = worktree
+  }
+  return (await evalInBrowserTab(page, `(async () => { ${hook} return "ok"; })()`)) === 'ok'
+}
+
 /** `ws://host:port` of a paired server is where it serves its web client over http. */
 export function webUrlOf(endpoint: string): string {
   return endpoint.replace(/^ws/i, 'http').replace(/\/+$/, '') + '/'
@@ -91,7 +129,7 @@ async function webTab(url: string): Promise<string> {
  * server's web client; without it the saved server's address is used.
  */
 export async function showChatInWebTab(worktreeId: string, tabId: string, webUrl?: string): Promise<WebTabResult> {
-  const script = steerScript(worktreeId, tabId)
+  const script = steerScript(worktreeId, tabId, hook)
   steps = []
   // How long each command took, for the log: a slow one holds up every chat asked for after it.
   const timed = async <T>(name: string, run: Promise<T>): Promise<T> => {

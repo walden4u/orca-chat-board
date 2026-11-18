@@ -21,6 +21,36 @@ test('the script run in the web client is one expression that parses, whatever t
   }
 })
 
+test('the key hook posts Alt+K once, only Alt+K, and swallows it; run again it only moves where to post', async () => {
+  const { keyHook } = await import('./webtab.ts')
+  const listeners: ((e: unknown) => void)[] = []
+  const win = { addEventListener: (_: string, f: (e: unknown) => void) => listeners.push(f) } as Record<string, unknown>
+  const posts: [string, { body: string; mode: string }][] = []
+  const fetch = (url: string, init: { body: string; mode: string }): Promise<void> => (posts.push([url, init]), Promise.resolve())
+  const run = (hook: string): void => new Function('window', 'fetch', hook)(win, fetch)
+  const body = JSON.stringify({ token: 't"k', from: 'me' })
+  run(keyHook('http://a:4927/key', body))
+  run(keyHook('http://b:4927/key', body))
+  assert.equal(listeners.length, 1)
+  const key = (o: Record<string, unknown>): { stopped: boolean } => {
+    const seen = { stopped: false }
+    listeners[0]({ altKey: false, ctrlKey: false, shiftKey: false, metaKey: false, repeat: false, code: 'KeyK', preventDefault() {}, stopImmediatePropagation: () => (seen.stopped = true), ...o })
+    return seen
+  }
+  assert.equal(key({}).stopped, false)
+  assert.equal(key({ altKey: true, code: 'KeyJ' }).stopped, false)
+  assert.equal(key({ altKey: true, shiftKey: true }).stopped, false)
+  assert.equal(key({ altKey: true }).stopped, true)
+  assert.equal(key({ altKey: true, repeat: true }).stopped, true)
+  assert.equal(posts.length, 1)
+  assert.equal(posts[0][0], 'http://b:4927/key')
+  assert.equal(posts[0][1].body, body)
+  assert.equal(posts[0][1].mode, 'no-cors')
+  const script = (await import('./webtab.ts')).steerScript('w', 't', keyHook('http://a/key', body))
+  assert.equal(script.includes('\n'), false)
+  assert.equal(typeof new Function(`return ${script}`), 'function')
+})
+
 test("Orca's complaint about a stale helper session names it", async () => {
   const { staleSessionOf } = await import('./stale.ts')
   assert.equal(

@@ -23,6 +23,11 @@ export function isDirect(): boolean {
   return door !== null
 }
 
+/** Where the server's web client page posts Alt+K (see webtab.ts `keyHook`), while there is a door. */
+export function keyDoor(): { url: string; token: string } | null {
+  return door ? { url: `${door.url}/key`, token: door.token } : null
+}
+
 /** Forgets the door: the server shown has changed. */
 export function forgetDoor(): void {
   door = null

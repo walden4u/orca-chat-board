@@ -3,10 +3,10 @@
 // (`orca plugin dev request … --environment <server>`), so the board, its columns, statuses,
 // reviews and settings are the server's own.
 import type { OrcaWorkerApi } from 'orca/worker'
-import { orcaEnvironment, setOrcaEnvironment, type RemoteTrouble } from './cli.ts'
-import { askServer, forgetDoor, isDirect, isListening, keepListening, onServerEvent } from './direct.ts'
+import { orcaEnvironment, serverEndpoint, setOrcaEnvironment, type RemoteTrouble } from './cli.ts'
+import { askServer, forgetDoor, isDirect, isListening, keepListening, keyDoor, onServerEvent } from './direct.ts'
 import { unseenHere, type SeenCard } from './unseen.ts'
-import { forgetWebTab, lastSteps, showChatInWebTab } from './webtab.ts'
+import { forgetWebTab, hookWebTab, keyHook, lastSteps, setKeyHook, showChatInWebTab, webUrlOf } from './webtab.ts'
 import { clearStaleSession, staleSessionOf } from './stale.ts'
 import { keys, keysWhy, markedSpot, setMarkedSpot, type KeysOp } from './keys.ts'
 
@@ -174,6 +174,7 @@ export default function activate(orca: OrcaWorkerApi): void {
     const attempt = async (): Promise<string> => {
       try {
         // A card's key is its tab's id on the server, which the web client's tabs carry too.
+        refreshKeyHook()
         return await showChatInWebTab(place.worktreeId, key)
       } catch (err) {
         return (err as Error).message.split('\n').pop() ?? ''
@@ -260,6 +261,27 @@ export default function activate(orca: OrcaWorkerApi): void {
     orca.panels.post('keys.bring' as never, null as never)
   })
 
+  // The same shortcut pressed while the keyboard is in the chat (the server's web client in a
+  // browser tab): that page takes the key before Orca, so it posts it to the server's door, which
+  // tells it back here (`keys.bring` with this worker's mark, so no other machine's board moves).
+  const me = Math.random().toString(36).slice(2, 12)
+  let hookedFor = ''
+  function refreshKeyHook(): void {
+    const at = keyDoor()
+    setKeyHook(at ? keyHook(at.url, JSON.stringify({ token: at.token, from: me })) : '')
+  }
+  // Put in as soon as there is a door, so the key works before any chat is shown from here.
+  function hookOnce(): void {
+    const at = keyDoor()
+    if (!at || hookedFor === at.token) return
+    hookedFor = at.token
+    refreshKeyHook()
+    void (async () => hookWebTab(webUrlOf(await serverEndpoint())))().then(
+      (put) => tellServer(`Alt+K in the web tab: ${put ? 'listened for' : 'no web tab yet, with the first chat shown'}`),
+      (err: Error) => tellServer(`Alt+K in the web tab: not listened for (${err.message.split('\n').pop()?.slice(0, 80)})`)
+    )
+  }
+
   // Whether the server answers directly: the panel then sends pictures as they are.
   orca.panels.handle('link.direct' as never, (() => isDirect()) as never)
 
@@ -280,6 +302,12 @@ export default function activate(orca: OrcaWorkerApi): void {
   }
   // The server tells of its changes itself while it answers directly.
   onServerEvent((name, payload) => {
+    if (name === 'keys.bring') {
+      if ((payload as { from?: unknown } | null)?.from !== me) return
+      tellServer('Alt+K in the web tab')
+      orca.panels.post('keys.bring' as never, null as never)
+      return
+    }
     if (name !== 'board.changed') return
     boardAt = Date.now()
     take(payload)
@@ -289,6 +317,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   setInterval(() => {
     const now = Date.now()
     keepListening((line) => orca.log(line))
+    hookOnce()
     // Asked directly a request costs next to nothing, so the board is kept fresher; told of
     // changes, it is only asked now and then, in case a change was not told.
     const pace = isListening() ? LISTENING_POLL_MS : isDirect() ? DIRECT_POLL_MS : POLL_MS
