@@ -84,7 +84,9 @@ export type ReplyHandlers = {
   onArrow?: (dx: number, dy: number) => void
 }
 
-const ARROWS: Record<string, [number, number] | undefined> = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }
+// In a reply box only left and right walk to another chat; up and down are the screen list's keys
+// (asked for on 2026-11-18, so that the box is worked with the keyboard alone).
+const SIDEWAYS: Record<string, number | undefined> = { ArrowLeft: -1, ArrowRight: 1 }
 
 /** A step of the mouse made for you (see `takeBack`): `KeysOp` of the worker's keys.ts. */
 export type MouseOp = 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'restore' | 'cancel'
@@ -318,6 +320,8 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // the keys for it in the terminal.
   let menu: ScreenMenu | null = null
   let picking = false
+  /** The option the up and down keys are on, or null before the first of them. */
+  let marked: number | null = null
   const menuBox = node('div', 'reply-menu')
   menuBox.hidden = true
   const showHint = () => {
@@ -483,7 +487,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     if (menu.question) menuBox.append(node('div', 'reply-menu-asked', menu.question))
     const list = node('div', 'reply-menu-list')
     menu.options.forEach((label, i) => {
-      const b = node('button', `ghost reply-menu-option${i === menu!.at ? ' at' : ''}`)
+      const b = node('button', `ghost reply-menu-option${marked === null && i === menu!.at ? ' at' : ''}${i === marked ? ' marked' : ''}`)
       b.append(node('span', 'reply-menu-key', String(i + 1)), node('span', '', label))
       b.disabled = picking
       b.onclick = () => void pick(i)
@@ -502,6 +506,27 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       e.preventDefault()
       e.stopPropagation()
       if (!e.repeat) engage('enter')
+      return
+    }
+    // Up and down go through the list on the chat's screen, here in the box only (nothing reaches
+    // the terminal until a pick). The first press shows where the screen's pointer is; Enter then
+    // picks the option marked. Not while the field holds a text of yours: there they move the caret.
+    // An Enter with nothing marked picks nothing, so a stray Enter never answers a permission request.
+    const vertical = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0
+    const bare = !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && !e.isComposing && e.keyCode !== 229
+    const writing = document.activeElement === input && !!input.value && input.value !== filled
+    if (vertical && bare && menu && !picking && !writing) {
+      e.preventDefault()
+      e.stopPropagation()
+      marked = marked === null ? menu.at : Math.min(menu.options.length - 1, Math.max(0, marked + vertical))
+      showMenu()
+      return
+    }
+    const enter = e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter'
+    if (enter && bare && menu && marked !== null && !writing && !(document.activeElement instanceof HTMLButtonElement)) {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!e.repeat && !busy && !pictures.length) void pick(marked)
       return
     }
     // Where the field cannot be written in (a permission request), a number picks from the list
@@ -748,11 +773,11 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   input.onkeydown = (e) => {
     // The arrow keys walk on to the next card's box while the field holds nothing of yours (empty,
     // or the drafted reply as it was put there). A held key is one step, not a run of boxes.
-    const step = ARROWS[e.key]
+    const step = SIDEWAYS[e.key]
     const bare = !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && !e.isComposing && e.keyCode !== 229
     if (step && handlers.onArrow && bare && !busy && (!input.value || input.value === filled)) {
       e.preventDefault()
-      if (!e.repeat) handlers.onArrow(step[0], step[1])
+      if (!e.repeat) handlers.onArrow(step, 0)
       return
     }
     const again = draft ?? suggestion
@@ -931,7 +956,10 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     void loadPreview(target.key, true).then(
     (data) => {
       if (!open) return
-      menu = data.menu ?? null
+      const next = data.menu ?? null
+      // Another list (or none): what the keys had marked was in the one before.
+      if (!next || !menu || next.question !== menu.question || next.options.join('\n') !== menu.options.join('\n')) marked = null
+      menu = next
       showMenu()
       if (data.suggestion && !readOnly) {
         suggestion = data.suggestion

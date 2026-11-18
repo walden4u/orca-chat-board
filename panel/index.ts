@@ -1056,12 +1056,29 @@ function nextChecked(dir: 1 | -1): HTMLElement | null {
   return ahead ?? (dir > 0 ? checked[0] : checked[checked.length - 1])
 }
 
+/**
+ * From a reply box, where only left and right walk (up and down pick from a list on the chat's
+ * screen): the open chat before or after this one in the board's order, column by column, top to
+ * bottom, and round the end. With the four keys of the board a column could be walked down; with two
+ * the order has to reach every card.
+ */
+function nextInOrder(dir: 1 | -1): HTMLElement | null {
+  const open = [...document.querySelectorAll<HTMLElement>('.board .column .card')].filter(
+    (el) => view?.cards.find((c) => c.key === el.dataset.key)?.closed !== true
+  )
+  if (!open.length) return null
+  const here = open.findIndex((c) => c.dataset.key === pickedKey)
+  if (here < 0) return open.find((c) => c.classList.contains('answer-due')) ?? open[0]
+  return open[(here + dir + open.length) % open.length]
+}
+
 /** One step of the arrow keys, from the board or (with the setting on) from an open reply box. */
 function walk(dx: number, dy: number): void {
   const box = replyKey()
   // A box that opened by itself, or from a click: the keys go on from its card.
   if (box) pickedKey = box
-  const target = arrowsOpenReply ? (nextChecked(dx + dy > 0 ? 1 : -1) ?? cardAt(dx, dy, true)) : cardAt(dx, dy, false)
+  const dir = dx + dy > 0 ? 1 : -1
+  const target = !arrowsOpenReply ? cardAt(dx, dy, false) : (nextChecked(dir) ?? (box ? nextInOrder(dir) : cardAt(dx, dy, true)))
   if (!target || (box && target.dataset.key === box)) return
   pickedKey = target.dataset.key ?? null
   if (!box) target.focus()

@@ -291,6 +291,9 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .reply-menu-option { display: flex; gap: 8px; align-items: baseline; text-align: left; padding: 4px 10px;
   border-color: var(--orca-border); word-break: break-word; }
 .reply-menu-option.at { border-color: var(--orca-primary); }
+/* The option the up and down keys are on: Enter picks it. */
+.reply-menu-option.marked { border-color: var(--orca-primary); box-shadow: inset 3px 0 0 var(--orca-primary);
+  background: color-mix(in srgb, var(--orca-primary) 22%, transparent); font-weight: 600; }
 .reply-menu-key { flex: none; font-weight: 700; color: var(--orca-muted-foreground); }
 /* The goal button whose turn it is. */
 .reply-next.due { border-color: var(--orca-primary); color: var(--orca-foreground); font-weight: 600;
