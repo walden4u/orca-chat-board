@@ -1179,6 +1179,7 @@ function boot(): void {
   // terminal (asked for on 2026-11-18: one key there and back). Orca's own shortcut does not fire
   // while the keys are in this panel (seen on b9), so the panel takes the key itself.
   let handedAt = 0
+  let handing = false
   document.addEventListener(
     'keydown',
     (e) => {
@@ -1186,17 +1187,25 @@ function boot(): void {
       if (!e.altKey || e.ctrlKey || e.shiftKey || e.metaKey || e.code !== 'Quote') return
       e.preventDefault()
       e.stopImmediatePropagation()
-      if (e.repeat) return
+      // One press can arrive twice (seen on both machines), or again while the chat is being
+      // shown: once is enough.
+      if (e.repeat || handing || Date.now() - handedAt < 400) return
       const key = replyKey() ?? pickedKey
       const c = key ? view?.cards.find((x) => x.key === key) : undefined
       if (!c || c.closed) return trace(`keys to the terminal by the shortcut: ${c ? 'its chat is closed' : 'no chat picked'}`)
       handedAt = Date.now()
+      handing = true
       // The box stays as it is, but no longer reaches for the keys once its chat has them.
       letKeysGo()
       // Leaving: the field lets go, and the input method with it (the box stays as it is). On the
       // board of the other machine the Korean input method otherwise stayed with the field left.
       ;(document.activeElement as HTMLElement | null)?.blur()
-      void focusChat(c).then(() => trace(`keys to the terminal by the shortcut: ${c.key.slice(0, 8)}`))
+      void focusChat(c)
+        .then(() => trace(`keys to the terminal by the shortcut: ${c.key.slice(0, 8)}`))
+        .finally(() => {
+          handing = false
+          handedAt = Date.now()
+        })
     },
     true
   )
@@ -1204,7 +1213,16 @@ function boot(): void {
     // Should Orca's shortcut fire too for the key just taken here, the keys are not pulled back.
     if (Date.now() - handedAt < 800) return
     void bringKeys(() => {
-      if (focusReply()) return
+      if (focusReply()) {
+        // Seen on b9 (2026-11-18): with the Korean input method on, the field had the keys and
+        // every key came as 'Process', yet nothing was typed in it: the input method stayed with
+        // the terminal left. Out of the field and back in, so that it moves here too.
+        setTimeout(() => {
+          ;(document.activeElement as HTMLElement | null)?.blur()
+          setTimeout(() => focusReply(), 30)
+        }, 30)
+        return
+      }
       const cards = [...document.querySelectorAll<HTMLElement>('.board .card')]
       const card = cards.find((c) => c.dataset.key === pickedKey) ?? cards.find((c) => c.classList.contains('answer-due')) ?? cards[0]
       if (!card) return
