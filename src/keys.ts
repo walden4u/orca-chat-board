@@ -13,8 +13,11 @@ import { execFile } from 'node:child_process'
  * `move`: once you are not typing, put the pointer on the marked spot. `move-now`: the same at
  * once (you asked for it with a shortcut). `restore`: put it back.
  * `cancel`: give up a wait that is still going on.
+ * `mark-chat`: remember where the pointer is now (you just clicked in the chat screen's terminal).
+ * `to-chat`: click that spot at once and put the pointer back (Alt+K on the board: the keys to the
+ * chat screen, which Orca does not hand them to when it is on screen already).
  */
-export type KeysOp = 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'move-now' | 'restore' | 'cancel'
+export type KeysOp = 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'move-now' | 'restore' | 'cancel' | 'mark-chat' | 'to-chat'
 
 /** Does one of those; false when it did not (Orca not in front, nothing marked, not Windows, given up). */
 export type Clicker = (op: KeysOp) => Promise<boolean>
@@ -182,6 +185,15 @@ export function setMarkedSpot(next: unknown): void {
   const s = next as { x?: unknown; y?: unknown } | null
   spot = s && typeof s.x === 'number' && typeof s.y === 'number' ? { x: s.x, y: s.y } : null
 }
+/** Where you last clicked in the chat screen's terminal (the browser tab), the same way. */
+let chatSpot: { x: number; y: number } | null = null
+export function markedChatSpot(): { x: number; y: number } | null {
+  return chatSpot
+}
+export function setMarkedChatSpot(next: unknown): void {
+  const s = next as { x?: unknown; y?: unknown } | null
+  chatSpot = s && typeof s.x === 'number' && typeof s.y === 'number' ? { x: s.x, y: s.y } : null
+}
 let why = ''
 
 /** Why the last step was not done, for the log. */
@@ -239,6 +251,23 @@ const defaultClicker: Clicker = async (op) => {
     if (said !== 'ok') return (why = 'the helper could not tell where the pointer is'), false
     spot = { x: Number(x), y: Number(y) }
     return true
+  }
+  if (op === 'mark-chat') {
+    const [said, x, y] = (await ask('k')).split(' ')
+    if (said !== 'ok') return (why = 'the helper could not tell where the pointer is'), false
+    chatSpot = { x: Number(x), y: Number(y) }
+    return true
+  }
+  if (op === 'to-chat') {
+    if (!chatSpot) return (why = 'no click in the chat screen remembered yet: click once in its terminal'), false
+    if (!(await step(`m ${chatSpot.x} ${chatSpot.y}`))) return false
+    await new Promise((r) => setTimeout(r, 60))
+    const clicked = await step('c')
+    const said = why
+    await new Promise((r) => setTimeout(r, 60))
+    await step('r')
+    why = said
+    return clicked
   }
   if (op === 'click') return step('c')
   if (op === 'restore') return step('r')

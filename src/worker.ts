@@ -8,7 +8,7 @@ import { askServer, forgetDoor, isDirect, isListening, keepListening, keyDoor, o
 import { unseenHere, type SeenCard } from './unseen.ts'
 import { forgetWebTab, hookWebTab, keyHook, lastSteps, setKeyHook, showChatInWebTab, webUrlOf } from './webtab.ts'
 import { clearStaleSession, staleSessionOf } from './stale.ts'
-import { keys, keysWhy, markedSpot, setMarkedSpot, type KeysOp } from './keys.ts'
+import { keys, keysWhy, markedChatSpot, markedSpot, setMarkedChatSpot, setMarkedSpot, type KeysOp } from './keys.ts'
 
 /** The Chat Board on the server: a development plugin, which is what `plugin dev request` can call. */
 const TARGET = 'local.chat-board'
@@ -235,6 +235,10 @@ export default function activate(orca: OrcaWorkerApi): void {
   const KEYS_SPOT_KEY = 'keysSpot'
   let ranOutLoggedAt = 0
   void orca.storage.get(KEYS_SPOT_KEY as never).then(setMarkedSpot).catch(() => undefined)
+  // Where you last clicked in the chat screen's terminal (see `to-chat` in keys.ts).
+  const CHAT_SPOT_KEY = 'chatSpot'
+  let chatMarkTold = false
+  void orca.storage.get(CHAT_SPOT_KEY as never).then(setMarkedChatSpot).catch(() => undefined)
   orca.panels.handle('keys.click' as never, (async (input: { op?: KeysOp } | null) => {
     const op = input?.op
     if (!op) return { ok: false }
@@ -268,7 +272,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   let hookedFor = ''
   function refreshKeyHook(): void {
     const at = keyDoor()
-    setKeyHook(at ? keyHook(at.url, JSON.stringify({ token: at.token, from: me })) : '')
+    setKeyHook(at ? keyHook(at.url, at.token, me) : '')
   }
   // Put in as soon as there is a door, so the key works before any chat is shown from here.
   function hookOnce(): void {
@@ -303,7 +307,17 @@ export default function activate(orca: OrcaWorkerApi): void {
   // The server tells of its changes itself while it answers directly.
   onServerEvent((name, payload) => {
     if (name === 'keys.bring') {
-      if ((payload as { from?: unknown } | null)?.from !== me) return
+      const said = payload as { from?: unknown; what?: unknown } | null
+      if (said?.from !== me) return
+      if (said.what === 'mark') {
+        void keys('mark-chat').then((ok) => {
+          if (ok) void orca.storage.set(CHAT_SPOT_KEY as never, markedChatSpot() as never).catch(() => undefined)
+          // Said once, and whenever it did not take.
+          if (!ok || !chatMarkTold) tellServer(`your click in the chat screen's terminal ${ok ? 'remembered' : `not remembered (${keysWhy()})`}`)
+          if (ok) chatMarkTold = true
+        })
+        return
+      }
       tellServer('Alt+K in the web tab')
       orca.panels.post('keys.bring' as never, null as never)
       return

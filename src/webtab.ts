@@ -78,15 +78,25 @@ export function steerScript(worktreeId: string, tabId: string, hook = ''): strin
  * as it is): a key pressed in that page never reaches Orca, so Orca's shortcut for `board.keys`
  * does nothing there. Run again with each chat shown, it only refreshes where to post.
  */
-export function keyHook(url: string, body: string): string {
+export function keyHook(url: string, token: string, from: string): string {
   return [
-    'const kb = window.__chatBoardKeys || (window.__chatBoardKeys = {});',
+    // The first version of this hook (its listener cannot be taken out) is silenced.
+    'if (window.__chatBoardKeys) window.__chatBoardKeys.url = "";',
+    'const kb = window.__chatBoardKeys2 || (window.__chatBoardKeys2 = {});',
+    'kb.post = (what) => fetch(kb.url, { method: "POST", mode: "no-cors", body: JSON.stringify({ token: kb.token, from: kb.from, what }) }).catch(() => {});',
     'if (!kb.on) { kb.on = true; window.addEventListener("keydown", (e) => {',
     '  if (!kb.url || !e.altKey || e.ctrlKey || e.shiftKey || e.metaKey || e.code !== "KeyK") return;',
     '  e.preventDefault(); e.stopImmediatePropagation();',
-    '  if (!e.repeat) fetch(kb.url, { method: "POST", mode: "no-cors", body: kb.body }).catch(() => {});',
-    '}, true); }',
-    `kb.url = ${JSON.stringify(url)}; kb.body = ${JSON.stringify(body)};`
+    '  if (!e.repeat) kb.post("key");',
+    '}, true);',
+    // A click of yours in a terminal here is where a click can be made for you later (Alt+K on
+    // the board): Orca does not hand the keys to this page when it is on screen already.
+    '  window.addEventListener("pointerdown", (e) => {',
+    '    if (!kb.url || !e.isTrusted || e.button !== 0 || !(e.target instanceof Element) || !e.target.closest(".xterm")) return;',
+    '    if (Date.now() - (kb.markedAt || 0) < 2000) return;',
+    '    kb.markedAt = Date.now(); kb.post("mark");',
+    '  }, true); }',
+    `kb.url = ${JSON.stringify(url)}; kb.token = ${JSON.stringify(token)}; kb.from = ${JSON.stringify(from)};`
   ].join(' ')
 }
 

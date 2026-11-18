@@ -1178,20 +1178,31 @@ function boot(): void {
   // terminal (asked for on 2026-11-18: one key there and back). Orca's own shortcut does not fire
   // while the keys are in this panel (seen on b9), so the panel takes the key itself.
   let handedAt = 0
+  let handing = false
   document.addEventListener(
     'keydown',
     (e) => {
       if (!e.altKey || e.ctrlKey || e.shiftKey || e.metaKey || e.code !== 'KeyK') return
       e.preventDefault()
       e.stopImmediatePropagation()
-      if (e.repeat) return
+      // Pressed again while the chat is still being shown (a second or two here): once is enough.
+      if (e.repeat || handing) return
       const key = replyKey() ?? pickedKey
       const c = key ? view?.cards.find((x) => x.key === key) : undefined
       if (!c || c.closed) return trace(`keys to the terminal by the shortcut: ${c ? 'its chat is closed' : 'no chat picked'}`)
       handedAt = Date.now()
+      handing = true
       // The box stays as it is, but no longer reaches for the keys once its chat has them.
       letKeysGo()
-      void focusChat(c).then(() => trace(`keys to the terminal by the shortcut: ${c.key.slice(0, 8)}`))
+      // Orca shows the chat screen but leaves the keys here when that browser tab is on screen
+      // already (b9, 2026-11-18): a click is made for you where you last clicked in its terminal.
+      void focusChat(c)
+        .then(() => replyMouse('to-chat'))
+        .then((clicked) => trace(`keys to the terminal by the shortcut: ${c.key.slice(0, 8)}, ${clicked ? 'clicked into the chat screen' : 'no click made'}`))
+        .finally(() => {
+          handing = false
+          handedAt = Date.now()
+        })
     },
     true
   )

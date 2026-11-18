@@ -92,7 +92,7 @@ const SCROLL_STEP_PX = 60
 
 
 /** A step of the mouse made for you (see `takeBack`): `KeysOp` of the worker's keys.ts. */
-export type MouseOp = 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'move-now' | 'restore' | 'cancel'
+export type MouseOp = 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'move-now' | 'restore' | 'cancel' | 'to-chat'
 let mouse: (op: MouseOp) => Promise<boolean> = async () => false
 /** The board gives the reply boxes their way to the mouse. */
 export function setReplyMouse(next: (op: MouseOp) => Promise<boolean>): void {
