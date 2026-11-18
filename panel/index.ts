@@ -376,7 +376,13 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
         // The chat comes up in the browser tab and the keyboard goes there with it: the mouse of
         // this machine is made ready to bring it back (see `takeBack` in reply.ts).
         void replyMouse('warm')
-        const r = await orca.plugin.request('chat.focus', { key: c.key }).catch(() => null)
+        const began = Date.now()
+        const r = await orca.plugin.request('chat.focus', { key: c.key }).catch((err: unknown) => {
+          trace(`reply show ${id} (${how}): failed: ${String((err as Error)?.message ?? err).slice(0, 120)}`)
+          return null
+        })
+        // Seen on the server's log too: the showing happens on this machine only.
+        if (r) trace(`reply show ${id} (${how}): ${r.ok ? 'ok' : (r.error ?? 'passed over')} in ${Date.now() - began} ms`)
         if (r?.ok && view && r.error !== 'chat-workspace') {
           for (const x of view.cards) x.active = x.key === c.key
           render()
