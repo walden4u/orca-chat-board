@@ -36,7 +36,8 @@ export async function clearStaleSession(name: string, home = process.env.USERPRO
   if (/^\d+$/.test(pid)) {
     const listed = await run('tasklist.exe', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'])
     if (/^"agent-browser/i.test(listed.trim())) {
-      await run('taskkill.exe', ['/PID', pid, '/F'])
+      // With its children: the browser it started for those settings would stay open otherwise.
+      await run('taskkill.exe', ['/PID', pid, '/T', '/F'])
       did.push(`ended process ${pid}`)
     }
   }
