@@ -7,6 +7,7 @@ import { orcaEnvironment, setOrcaEnvironment, type RemoteTrouble } from './cli.t
 import { askServer, forgetDoor, isDirect, isListening, keepListening, onServerEvent } from './direct.ts'
 import { unseenHere, type SeenCard } from './unseen.ts'
 import { forgetWebTab, lastSteps, showChatInWebTab } from './webtab.ts'
+import { clearStaleSession, staleSessionOf } from './stale.ts'
 import { keys, keysWhy, markedSpot, setMarkedSpot, type KeysOp } from './keys.ts'
 
 /** The Chat Board on the server: a development plugin, which is what `plugin dev request` can call. */
@@ -169,13 +170,24 @@ export default function activate(orca: OrcaWorkerApi): void {
   }
 
   async function showNow(key: string, place: Place): Promise<Shown | null> {
-    let answer: string
     const began = Date.now()
-    try {
-      // A card's key is its tab's id on the server, which the web client's tabs carry too.
-      answer = await showChatInWebTab(place.worktreeId, key)
-    } catch (err) {
-      answer = (err as Error).message.split('\n').pop() ?? ''
+    const attempt = async (): Promise<string> => {
+      try {
+        // A card's key is its tab's id on the server, which the web client's tabs carry too.
+        return await showChatInWebTab(place.worktreeId, key)
+      } catch (err) {
+        return (err as Error).message.split('\n').pop() ?? ''
+      }
+    }
+    let answer = await attempt()
+    // Orca's browser helper kept a session from before Orca started again, and cannot close it
+    // (see stale.ts): it is cleared here and the chat shown again, once.
+    const stale = staleSessionOf(answer)
+    if (stale) {
+      const line = `stale browser helper session ${stale}: ${await clearStaleSession(stale)}, after ${Date.now() - began} ms`
+      orca.log(line)
+      tellServer(line)
+      answer = await attempt()
     }
     const line = `chat ${key.slice(0, 8)} ${answer === 'ok' ? 'shown here' : `not shown here: ${answer.slice(0, 80)}`} in ${Date.now() - began} ms (${lastSteps()})`
     orca.log(line)

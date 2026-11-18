@@ -20,3 +20,12 @@ test('the script run in the web client is one expression that parses, whatever t
     assert.equal(script.includes(JSON.stringify(tab)), true)
   }
 })
+
+test("Orca's complaint about a stale helper session names it", async () => {
+  const { staleSessionOf } = await import('./stale.ts')
+  assert.equal(
+    staleSessionOf('Could not reset stale helper session orca-tab-d7d48f78-5d00-449d-ab09-f0ecb9603c5b; retry after agent-browser exits'),
+    'orca-tab-d7d48f78-5d00-449d-ab09-f0ecb9603c5b'
+  )
+  assert.equal(staleSessionOf('not-ready'), null)
+})
