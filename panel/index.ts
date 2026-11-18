@@ -370,7 +370,7 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       // With the setting on, the arrow keys go on from this box to the next card's.
       onArrow: arrowsOpenReply ? walk : undefined,
       onEngaged: async (how = 'open') => {
-        // Asked for with Enter in an empty field, or by staying on the chat (a setting of its own):
+        // Asked for with Alt+Enter or the title, or by staying on the chat (a setting of its own):
         // shown whatever "show the chat beside the box" says.
         if ((!followChat && how === 'open') || c.closed) return false
         // The chat comes up in the browser tab and the keyboard goes there with it: the mouse of
