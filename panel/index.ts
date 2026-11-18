@@ -369,7 +369,7 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       onArrow: arrowsOpenReply ? walk : undefined,
       // You are at this box: with the setting on, Orca shows that chat's tab beside it.
       onEngaged: async (how = 'open') => {
-        // Asked for with Enter in an empty field, or by staying on the chat (a setting of its own):
+        // Asked for with Alt+Enter or the title, or by staying on the chat (a setting of its own):
         // shown whatever "show the chat beside the box" says.
         if ((!followChat && how === 'open') || c.closed) return false
         if (SHOWING_TAKES_KEYS) {

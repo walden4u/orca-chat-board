@@ -49,8 +49,8 @@ export type ReplyTarget = {
 }
 
 /**
- * Why the chat itself is asked for: the box opened ('open'), you pressed Enter in its empty field
- * ('enter'), clicked its title ('title'), or the arrow keys brought you to it and you stayed ('stay').
+ * Why the chat itself is asked for: the box opened ('open'), you pressed Alt+Enter ('enter'),
+ * clicked its title ('title'), or the arrow keys brought you to it and you stayed ('stay').
  */
 export type Engaged = 'open' | 'enter' | 'title' | 'stay'
 /**
@@ -753,6 +753,13 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       advise()
       return
     }
+    // Alt+Enter shows the chat in its terminal, as a click on the title does: what you wrote stays,
+    // nothing is sent (asked for on 2026-11-18, in place of Enter in the empty field).
+    if (e.key === 'Enter' && e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault()
+      if (!e.repeat) engage('enter')
+      return
+    }
     // Enter sends, Shift+Enter adds a line. While an IME composes (Korean, Japanese…), Enter
     // belongs to the IME: it confirms the word and must not send (keyCode 229 in older engines).
     // A held key is not a decision: one Enter, one message.
@@ -766,9 +773,9 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       drafts.delete(target.key)
       return void pick(chosen - 1)
     }
-    // Enter with nothing to send asks for the chat itself: Orca shows its tab beside this box
-    // (as a click in the box does), and the field takes the keys back.
-    if (!input.value.trim() && !pictures.length && !readOnly && !busy) return engage('enter')
+    // Enter only ever sends: with nothing to send it does nothing (until 2026-11-18 it showed the
+    // chat, which is Alt+Enter's now).
+    if (!input.value.trim() && !pictures.length) return
     void submit()
   }
   document.addEventListener('keydown', onKey, true)
@@ -890,12 +897,12 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       if (moved) for (const ms of [700, 1500, 3000]) setTimeout(() => void (open && !hasKeys() && takeBack()), ms)
     })
   }
-  // A box that opened by itself or by the arrow keys shows its chat only when you ask: Enter in the
-  // empty field, or a click on its title. Not a click anywhere in it (until 2026-11-18): you click
+  // A box that opened by itself or by the arrow keys shows its chat only when you ask: Alt+Enter,
+  // or a click on its title. Not a click anywhere in it (until 2026-11-18): you click
   // the field to write, and the chat came up in the middle of your words.
   if (!target.auto && !target.byArrows) engage()
   title.addEventListener('click', () => engage('title'))
-  // A setting (off unless you turn it on: without it, Enter in the empty field asks for the chat).
+  // A setting (off unless you turn it on: without it, Alt+Enter or the title asks for the chat).
   // The arrow keys came to this chat and stayed: its tab is shown as if you had asked. Not on
   // the way past (each showing takes the keyboard away for a moment), and not once you type:
   // letters typed in that moment would land in the terminal.
