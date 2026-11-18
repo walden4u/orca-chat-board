@@ -87,6 +87,8 @@ export type ReplyHandlers = {
 // In a reply box only left and right walk to another chat; up and down are the screen list's keys
 // (asked for on 2026-11-18, so that the box is worked with the keyboard alone).
 const SIDEWAYS: Record<string, number | undefined> = { ArrowLeft: -1, ArrowRight: 1 }
+/** How far one press of up or down scrolls a box with no list on its chat's screen: about three lines. */
+const SCROLL_STEP_PX = 60
 
 /** A step of the mouse made for you (see `takeBack`): `KeysOp` of the worker's keys.ts. */
 export type MouseOp = 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'restore' | 'cancel'
@@ -520,6 +522,17 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       e.stopPropagation()
       marked = marked === null ? menu.at : Math.min(menu.options.length - 1, Math.max(0, marked + vertical))
       showMenu()
+      return
+    }
+    // With no list to pick from, up and down scroll the box (the agent's reply) a few lines, held
+    // down they go on; PageUp and PageDown a page at a time, a list or not (asked for on 2026-11-18:
+    // the box read with the keyboard alone). Orca's terminal itself cannot be scrolled from here.
+    const paging = e.key === 'PageUp' ? -1 : e.key === 'PageDown' ? 1 : 0
+    if ((vertical || paging) && bare && !writing) {
+      e.preventDefault()
+      e.stopPropagation()
+      const by = paging ? paging * Math.max(40, body.clientHeight - 40) : vertical * SCROLL_STEP_PX
+      body.scrollBy({ top: by, behavior: e.repeat ? 'auto' : 'smooth' })
       return
     }
     const enter = e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter'
