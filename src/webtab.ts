@@ -83,15 +83,17 @@ export function keyHook(url: string, token: string, from: string): string {
     // The first version of this hook (its listener cannot be taken out) is silenced.
     // Earlier versions of this hook (their listeners cannot be taken out) are silenced: change the
     // name whenever the listeners change, or a page that has the old ones never gets the new.
-    'for (const old of ["__chatBoardKeys", "__chatBoardKeys2", "__chatBoardKeys3"]) if (window[old]) window[old].url = "";',
-    'const kb = window.__chatBoardKeys4 || (window.__chatBoardKeys4 = {});',
+    'for (const old of ["__chatBoardKeys", "__chatBoardKeys2", "__chatBoardKeys3", "__chatBoardKeys4"]) if (window[old]) window[old].url = "";',
+    'const kb = window.__chatBoardKeys5 || (window.__chatBoardKeys5 = {});',
     'kb.post = (what) => fetch(kb.url, { method: "POST", mode: "no-cors", body: JSON.stringify({ token: kb.token, from: kb.from, what }) }).catch(() => {});',
     'if (!kb.on) { kb.on = true; window.addEventListener("keydown", (e) => {',
     '  if (!kb.url || !e.altKey || e.ctrlKey || e.shiftKey || e.metaKey || e.code !== "KeyK") return;',
     '  e.preventDefault(); e.stopImmediatePropagation();',
     // One press can arrive twice (seen on b9, 5 to 15 ms apart): posted once.
     '  if (e.repeat || Date.now() - (kb.keyAt || 0) < 400) return;',
-    '  kb.keyAt = Date.now(); kb.post("key");',
+    // Leaving: the terminal's field lets go, and the input method with it (b9, 2026-11-18: the
+    // Korean input method stayed with the field left, and nothing could be typed where the keys went).
+    '  kb.keyAt = Date.now(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); kb.post("key");',
     '}, true);',
     // A click of yours in a terminal here is where a click can be made for you later (Alt+K on
     // the board): Orca does not hand the keys to this page when it is on screen already.
@@ -102,7 +104,8 @@ export function keyHook(url: string, token: string, from: string): string {
     // That click is to type in the terminal: its field gets the keys, should the page not have
     // put them there (seen on b9: Alt+K reached the page after such a click, the letters did not
     // reach the terminal).
-    '    setTimeout(() => { const ta = term.querySelector(".xterm-helper-textarea"); if (ta && document.activeElement !== ta) { ta.focus({ preventScroll: true }); kb.post(document.activeElement === ta ? "focus-fixed" : "focus-not-fixed"); } }, 80);',
+    // Arriving: out of the field and back in, for the input method to follow (as the board does).
+    '    setTimeout(() => { const ta = term.querySelector(".xterm-helper-textarea"); if (!ta) return; const had = document.activeElement === ta; ta.blur(); setTimeout(() => { ta.focus({ preventScroll: true }); if (!had) kb.post(document.activeElement === ta ? "focus-fixed" : "focus-not-fixed"); }, 30); }, 80);',
     '    if (Date.now() - (kb.markedAt || 0) < 2000) return;',
     '    kb.markedAt = Date.now(); kb.post("mark");',
     '  }, true);',

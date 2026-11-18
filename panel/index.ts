@@ -1231,6 +1231,8 @@ function boot(): void {
       handing = true
       // The box stays as it is, but no longer reaches for the keys once its chat has them.
       letKeysGo()
+      // Leaving: the field lets go, and the input method with it (the box stays as it is).
+      ;(document.activeElement as HTMLElement | null)?.blur()
       // Orca shows the chat screen but leaves the keys here when that browser tab is on screen
       // already (b9, 2026-11-18): a click is made for you where you last clicked in its terminal.
       // The chat on screen there already (asked for by this board last): no showing it again,
