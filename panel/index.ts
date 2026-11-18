@@ -1259,7 +1259,16 @@ function boot(): void {
     // Should Orca's shortcut fire too for the key just taken here, the keys are not pulled back.
     if (Date.now() - handedAt < 800) return
     void bringKeys(() => {
-      if (focusReply()) return
+      if (focusReply()) {
+        // Seen on b9 (2026-11-18): with the Korean input method on, the field had the keys and
+        // every key came as 'Process', yet nothing was typed in it: the input method stayed with
+        // the chat screen's page. Out of the field and back in, so that it moves here too.
+        setTimeout(() => {
+          ;(document.activeElement as HTMLElement | null)?.blur()
+          setTimeout(() => focusReply(), 30)
+        }, 30)
+        return
+      }
       const cards = [...document.querySelectorAll<HTMLElement>('.board .card')]
       const card = cards.find((c) => c.dataset.key === pickedKey) ?? cards.find((c) => c.classList.contains('answer-due')) ?? cards[0]
       if (!card) return
