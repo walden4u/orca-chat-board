@@ -237,11 +237,13 @@ function setView(next: BoardView | null): void {
   if (open && card) {
     setReplyChat(open, { working: statusOf(card) === 'working', turnAt: card.stateAt, goalFile: goalMode ? card.goalFile : null })
     if (goalMode) setReplyJudge(open, card.judge ?? null, card.drafts ?? null)
-    // A turn that ended while you had this chat's box open has been seen there.
-    if (card.unseenAt && card.unseenAt !== readHere.get(card.key)) {
-      readHere.set(card.key, card.unseenAt)
-      card.unseenAt = null
-      void request<BoardView>('card.seen', { key: card.key }).then((v) => setView(v))
+    // A turn that ended while this chat's box was open is seen once you answer from the box. The
+    // box may just have been left open (walked to with the arrow keys, you looking elsewhere): on
+    // 2026-11-18 such a chat ended with a question, its box was closed unanswered, and it never
+    // opened again by itself. So its mark stays until you answer, see `leftUnanswered`.
+    if (card.unseenAt && card.unseenAt !== readHere.get(card.key) && !endedOpen.has(card.key)) {
+      endedOpen.add(card.key)
+      trace(`reply ${card.key.slice(0, 8)}: its turn ended with the box open`)
     }
   }
   openNextWaiting()
@@ -301,7 +303,10 @@ function answerDue(c: CardView): boolean {
 
 /** A checked chat that finished and was not seen yet: its reply box is due to open. */
 function isWaiting(c: CardView): boolean {
-  return !!c.watch && !c.closed && !!c.unseenAt && c.unseenAt !== readHere.get(c.key)
+  if (!c.watch || c.closed || !c.unseenAt || c.unseenAt === readHere.get(c.key)) return false
+  const later = putOff.get(c.key)
+  if (later === undefined || c.unseenAt > later || Date.now() - later >= QUEUE_HOLD_MS) return true
+  return (view?.cards ?? []).some((x) => x.key !== c.key && x.watch && !x.closed && (x.unseenAt ?? 0) > later)
 }
 
 /** Checked chats that finished and were not seen yet, in the order they finished. */
@@ -324,6 +329,36 @@ const QUEUE_HOLD_MS = 120_000
  */
 const readHere = new Map<string, number>()
 
+/** Chats whose turn ended while their box was open, not answered from it yet. */
+const endedOpen = new Set<string>()
+/** When a box was left with its ended turn unanswered: the chat waits a while before it opens again. */
+const putOff = new Map<string, number>()
+
+/** Seen: the box was answered, or you went to the chat itself. */
+function markSeen(key: string): void {
+  endedOpen.delete(key)
+  putOff.delete(key)
+  const c = view?.cards.find((x) => x.key === key)
+  if (!c?.unseenAt || c.unseenAt === readHere.get(key)) return
+  readHere.set(key, c.unseenAt)
+  c.unseenAt = null
+  render()
+  void request<BoardView>('card.seen', { key }).then((v) => setView(v))
+}
+
+/**
+ * A box left without an answer to the turn that ended while it was open (closed, or walked away
+ * from): the chat stays unseen and opens again by itself, though not at once (Escape would be of
+ * no use): once another checked chat finishes, or after a while, as after ↗.
+ */
+function leftUnanswered(key: string): void {
+  if (!endedOpen.delete(key)) return
+  const c = view?.cards.find((x) => x.key === key)
+  if (!c?.unseenAt || c.unseenAt === readHere.get(key)) return
+  putOff.set(key, Date.now())
+  trace(`reply ${key.slice(0, 8)}: left unanswered, opens again later`)
+}
+
 /** One line in the plugin's log (`orca plugin logs`) about the reply boxes: what opened, how it was left. */
 function trace(message: string): void {
   void orca.plugin.request('trace', { message }).catch(() => undefined)
@@ -334,6 +369,11 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
   const kind = statusOf(c)
   const id = c.key.slice(0, 8)
   trace(`reply open ${id} (${how}), ${waitingCards(c.key).length} waiting`)
+  // This box takes the place of another one (the arrow keys, Next): that one was left as it was.
+  const before = replyKey()
+  if (before && before !== c.key) leftUnanswered(before)
+  endedOpen.delete(c.key)
+  putOff.delete(c.key)
   if (c.unseenAt) {
     // Read here counts as seen (it leaves the queue too), at once and then in the worker.
     readHere.set(c.key, c.unseenAt)
@@ -393,6 +433,7 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       onKeys: (what) => trace(`reply keys ${id}: ${what}`),
       onSent: (title) => {
         trace(`reply left ${id}: sent`)
+        markSeen(c.key)
         showFlash(t.sent(title), true)
         stayAlert()
         openNextWaiting(true)
@@ -401,10 +442,12 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       // Closing a box is done with that chat, not with the queue: the next one that waits opens.
       onNext: () => {
         trace(`reply left ${id}: next`)
+        leftUnanswered(c.key)
         openNextWaiting(true)
       },
       onFinish: () => {
         trace(`reply left ${id}: finished, unchecked`)
+        markSeen(c.key)
         void setWatch(c, false).then(() => {
           openNextWaiting(true)
           setTimeout(keepPicked, 0)
@@ -412,11 +455,13 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       },
       onClosed: () => {
         trace(`reply left ${id}: closed`)
+        leftUnanswered(c.key)
         openNextWaiting(true)
         setTimeout(keepPicked, 0)
       },
       onOpenChat: () => {
         trace(`reply left ${id}: to the chat, queue held`)
+        markSeen(c.key)
         queueHeldAt = Date.now()
         void focusChat(c)
       }
