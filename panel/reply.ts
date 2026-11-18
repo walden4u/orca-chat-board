@@ -91,7 +91,7 @@ const SIDEWAYS: Record<string, number | undefined> = { ArrowLeft: -1, ArrowRight
 const SCROLL_STEP_PX = 60
 
 /** A step of the mouse made for you (see `takeBack`): `KeysOp` of the worker's keys.ts. */
-export type MouseOp = 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'restore' | 'cancel'
+export type MouseOp = 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'move-now' | 'restore' | 'cancel'
 let mouse: (op: MouseOp) => Promise<boolean> = async () => false
 /** The board gives the reply boxes their way to the mouse. */
 export function setReplyMouse(next: (op: MouseOp) => Promise<boolean>): void {
@@ -124,6 +124,47 @@ export const SHOWING_TAKES_KEYS = true
 /** Whether a click made where the pointer is would land on this panel. */
 export function pointerOverPanel(): boolean {
   return pointerIn
+}
+
+/**
+ * The keyboard back in this panel, at your word: Orca's shortcut for this plugin's command (asked
+ * for on 2026-11-18, to go from a terminal back to the board with the keyboard alone). A frame
+ * cannot take the keys from a terminal by asking, only by a click in it: one is made at once
+ * (you are not typing, you just pressed the shortcut), where the pointer is when it is over the
+ * panel, else at the spot of your last click here, with the pointer put back. A sheet over the
+ * whole panel takes the click, so that it presses nothing; `land` then puts the keys where they
+ * belong. Says what happened, for the log.
+ */
+export async function bringKeys(land: () => void): Promise<string> {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  let clicked = false
+  let moved = false
+  const sheet = node('div', 'reply-sheet')
+  sheet.addEventListener('click', () => {
+    clicked = true
+    sheet.remove()
+    land()
+  })
+  document.body.append(sheet)
+  try {
+    if (!pointerIn) {
+      moved = await mouse('move-now')
+      if (!moved) return 'pointer elsewhere and not brought here'
+      await pause(150)
+      if (!pointerIn) return 'the pointer did not land on the panel'
+    }
+    await mouse('click')
+    await pause(250)
+  } finally {
+    sheet.remove()
+    if (moved) void mouse('restore')
+  }
+  return clicked ? `back by a click${moved ? ', the pointer put back' : ''}` : 'clicked, but not here'
+}
+
+/** Puts the keys in the open reply box (its field, or the box itself when it cannot be written in). False with no box. */
+export function focusReply(): boolean {
+  return current?.focus() ?? false
 }
 
 const PICTURE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
@@ -160,6 +201,7 @@ let current: {
   setWaiting: (n: number) => void
   setJudge: (judge: JudgeState | null, tally: DraftTally | null) => void
   setChat: (live: ReplyLive) => void
+  focus: () => boolean
 } | null = null
 
 /** The chat whose box is open, if any. */
@@ -490,7 +532,8 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     const list = node('div', 'reply-menu-list')
     menu.options.forEach((label, i) => {
       const b = node('button', `ghost reply-menu-option${marked === null && i === menu!.at ? ' at' : ''}${i === marked ? ' marked' : ''}`)
-      b.append(node('span', 'reply-menu-key', String(i + 1)), node('span', '', label))
+      // The screen's "Next" row has no number: it goes on to the next question.
+      b.append(node('span', 'reply-menu-key', i === menu!.next ? '→' : String(i + 1)), node('span', '', label))
       b.disabled = picking
       b.onclick = () => void pick(i)
       list.append(b)
@@ -546,7 +589,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     // on the chat's screen at once. In a field you can write in, a number may be the start of a
     // sentence ("1번으로…"): there it is the number and then Enter (see the field's own keys).
     const n = /^[1-9]$/.test(e.key) ? Number(e.key) : 0
-    if (!n || !readOnly || !menu || n > menu.options.length || e.ctrlKey || e.altKey || e.metaKey || e.isComposing || e.repeat) return
+    if (!n || !readOnly || !menu || n > menu.options.length || n - 1 === menu.next || e.ctrlKey || e.altKey || e.metaKey || e.isComposing || e.repeat) return
     e.preventDefault()
     e.stopPropagation()
     void pick(n - 1)
@@ -650,7 +693,18 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     shutBox()
     then()
   }
-  current = { key: target.key, shut: shutBox, setWaiting, setJudge: showJudge, setChat: (live) => setChat(live) }
+  current = {
+    key: target.key,
+    shut: shutBox,
+    setWaiting,
+    setJudge: showJudge,
+    setChat: (live) => setChat(live),
+    // A box that cannot be written in takes its keys (numbers, arrows, Enter) on the page itself.
+    focus: () => {
+      if (!readOnly) input.focus()
+      return true
+    }
+  }
 
   /**
    * Sends what is in the field, or `prepared`: a prompt one of the goal buttons made. `keepField`:
@@ -809,7 +863,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     // A list on the chat's screen, and the field holds just the number of one of its options:
     // Enter picks it. Nothing is sent as a message.
     const chosen = menu && !pictures.length && /^[1-9]$/.test(input.value.trim()) ? Number(input.value.trim()) : 0
-    if (menu && chosen && chosen <= menu.options.length && !busy) {
+    if (menu && chosen && chosen <= menu.options.length && chosen - 1 !== menu.next && !busy) {
       input.value = ''
       drafts.delete(target.key)
       return void pick(chosen - 1)

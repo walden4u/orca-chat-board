@@ -1003,6 +1003,13 @@ export default function activate(orca: OrcaWorkerApi): void {
     return { ok }
   })
 
+  // The keyboard from a terminal back to the board, with a shortcut you give this command in Orca
+  // (`~/.orca/keybindings.json`: "plugin:local.chat-board/board.keys"), or from the command palette.
+  // The panel does it (see `bringKeys`); a panel that is not open hears nothing.
+  orca.commands.register('board.keys', () => {
+    orca.panels.post('keys.bring', null)
+  })
+
   handle('chat.focus', async ({ key }) => {
     let handle = handles[key]
     if (!handle) {

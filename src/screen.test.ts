@@ -51,6 +51,63 @@ const ASKED = [
   'Enter to select · ↑/↓ to navigate · Esc to cancel'
 ]
 
+// Two questions at once, the first where several may be ticked (2026-11-18).
+const TICKS = [
+  '❯ Test only, do nothing else: call the AskUserQuestion tool once with two',
+  '  questions.',
+  '──────────────────────────────────────────────────────────────────────────────────',
+  '←  ☒ Fruits  ☐ Color  ✔ Submit  →',
+  'Which fruits?',
+  '❯ 1. [✔] Apple',
+  '         Apple',
+  '  2. [ ] Banana',
+  '         Banana',
+  '  3. [ ] Cherry',
+  '         Cherry',
+  '  4. [ ] Type something',
+  '     Next',
+  '──────────────────────────────────────────────────────────────────────────────────',
+  '  5. Chat about this',
+  'Enter to select · Tab/Arrow keys to navigate · Esc to cancel'
+]
+
+const REVIEW = [
+  '  line.',
+  '──────────────────────────────────────────────────────────',
+  '←  ☒ Fruits  ☒ Color  ✔ Submit  →',
+  'Review your answers',
+  ' ● Which fruits?',
+  '   → Apple',
+  ' ● Which color?',
+  '   → Green',
+  '❯ 1. Submit answers',
+  '  2. Cancel'
+]
+
+test('a question where several may be ticked: a number ticks one, and its Next row goes on', () => {
+  const menu = menuOf(TICKS)
+  assert.deepEqual(menu?.options, ['[✔] Apple', '[ ] Banana', '[ ] Cherry', '[ ] Type something', 'Chat about this', 'Next'])
+  assert.equal(menu?.next, 5)
+  assert.equal(menu?.at, 0)
+  assert.deepEqual(keysFor(menu!, 1), ['2'])
+  assert.deepEqual(keysFor(menu!, 5), ['\x1b[C'])
+  // The pointer on the Next row itself.
+  const onNext = TICKS.map((r) => (r === '❯ 1. [✔] Apple' ? '  1. [✔] Apple' : r === '     Next' ? '   ❯ Next' : r))
+  const there = menuOf(onNext)
+  assert.equal(there?.options.length, 6)
+  assert.equal(there?.at, 5)
+  assert.equal(menuOf(ASKED)?.next, undefined)
+})
+
+test('the review of the answers ends with its list and no word about Enter', () => {
+  const menu = menuOf(REVIEW)
+  assert.deepEqual(menu?.options, ['Submit answers', 'Cancel'])
+  assert.match(menu!.question, /Review your answers\n● Which fruits\?\n→ Apple\n● Which color\?\n→ Green$/)
+  assert.deepEqual(keysFor(menu!, 0), ['1'])
+  // Without the review's heading, a list with nothing under it is no list.
+  assert.equal(menuOf(REVIEW.filter((r) => r !== 'Review your answers')), null)
+})
+
 test('the question whether to resume a long conversation is a numbered list', () => {
   const menu = menuOf(RESUME)
   assert.deepEqual(menu?.options, ['Resume', 'Start a new conversation'])

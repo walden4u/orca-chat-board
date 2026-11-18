@@ -207,7 +207,7 @@ declare module 'orca' {
      * Mouse steps that give the reply box the keyboard (Windows, and only while Orca is in front):
      * see `KeysOp` in keys.ts. Answers this Orca's own panel, never a board on another machine.
      */
-    'keys.click': { input: { op: 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'restore' | 'cancel' }; output: { ok: boolean } }
+    'keys.click': { input: { op: 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'move-now' | 'restore' | 'cancel' }; output: { ok: boolean } }
     /** Shows the chat's terminal tab in Orca. */
     'chat.focus': { input: { key: string }; output: { ok: boolean; error: 'closed' | string | null } }
     /**
@@ -257,5 +257,7 @@ declare module 'orca' {
   }
   interface PluginPanelEvents {
     'board.changed': BoardView
+    /** Your shortcut for the board (the command `board.keys`): the panel takes the keyboard back. Only on this machine. */
+    'keys.bring': null
   }
 }

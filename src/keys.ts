@@ -10,10 +10,11 @@ import { execFile } from 'node:child_process'
 /**
  * `warm`: get ready. `mark`: remember where the pointer is now (you just clicked in the panel).
  * `click`: press the button in place. `click-idle`: the same, once you are not typing.
- * `move`: once you are not typing, put the pointer on the marked spot. `restore`: put it back.
+ * `move`: once you are not typing, put the pointer on the marked spot. `move-now`: the same at
+ * once (you asked for it with a shortcut). `restore`: put it back.
  * `cancel`: give up a wait that is still going on.
  */
-export type KeysOp = 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'restore' | 'cancel'
+export type KeysOp = 'warm' | 'mark' | 'click' | 'click-idle' | 'move' | 'move-now' | 'restore' | 'cancel'
 
 /** Does one of those; false when it did not (Orca not in front, nothing marked, not Windows, given up). */
 export type Clicker = (op: KeysOp) => Promise<boolean>
@@ -241,6 +242,7 @@ const defaultClicker: Clicker = async (op) => {
   }
   if (op === 'click') return step('c')
   if (op === 'restore') return step('r')
+  if (op === 'move-now') return spot ? step(`m ${spot.x} ${spot.y}`) : ((why = 'no click in the panel remembered yet'), false)
   if (!(await untilStill(op === 'move' ? GIVE_UP_MOVE_MS : GIVE_UP_MS))) return false
   if (op !== 'move') return step('c')
   if (!spot) return (why = 'no click in the panel remembered yet'), false
