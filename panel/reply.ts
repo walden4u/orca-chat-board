@@ -3,7 +3,7 @@
 // The box lives outside the board, so the board's redraws never touch what you are typing.
 import type { DraftTally, GoalFile, JudgeState, ScreenMenu } from '../src/protocol.ts'
 import { t } from './i18n.ts'
-import { loadPreview, plain } from './preview.ts'
+import { loadPreview, plain, richText } from './preview.ts'
 
 export type ReplyTarget = {
   key: string
@@ -49,10 +49,10 @@ export type ReplyTarget = {
 }
 
 /**
- * Why the chat itself is asked for: the box opened or was clicked ('open'), you pressed Enter in
- * its empty field ('enter'), or the arrow keys brought you to it and you stayed ('stay').
+ * Why the chat itself is asked for: the box opened ('open'), you pressed Enter in its empty field
+ * ('enter'), clicked its title ('title'), or the arrow keys brought you to it and you stayed ('stay').
  */
-export type Engaged = 'open' | 'enter' | 'stay'
+export type Engaged = 'open' | 'enter' | 'title' | 'stay'
 /**
  * How long the arrow keys rest on a chat before its tab is shown beside the box. Tried at 1 s (too
  * long a wait) and at 0 (2026-11-17: every chat passed on the way was shown, one after the other,
@@ -275,7 +275,10 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   toChat.title = t.openChat
   toChat.setAttribute('aria-label', t.openChat)
   const waiting = node('span', 'reply-waiting')
-  head.append(node('span', 'reply-title', target.title))
+  // Its title shows the chat in its terminal, the box staying as it is (see `engage`).
+  const title = node('span', 'reply-title', target.title)
+  title.title = t.showChat
+  head.append(title)
   if (target.workspace) head.append(node('span', 'chip ws', target.workspace))
   head.append(waiting, toChat, shut)
 
@@ -923,9 +926,9 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     }, 0)
   }
   let engaged = false
-  // Pressing Enter for it does it again, whatever was done before.
+  // Pressing Enter for it, or clicking its title, does it again, whatever was done before.
   const engage = (how: Engaged = 'open') => {
-    if (engaged && how !== 'enter') return
+    if (engaged && how !== 'enter' && how !== 'title') return
     engaged = true
     void handlers.onEngaged(how).then((moved) => {
       // A box that opened by itself leaves the keys alone until you are not typing (see `takeBack`).
@@ -939,10 +942,12 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // On this board a box that opened by itself shows its chat at once too (asked for on
   // 2026-11-16): the chat that just finished is what you want to read. The keyboard goes to
   // the chat's tab with it, and comes back to this box by the click made for you.
-  // A box the arrow keys opened shows its chat only when you click in it: on the way past,
-  // nothing should move but the box.
-  if (target.byArrows) dialog.addEventListener('pointerdown', () => engage(), true)
-  else engage()
+  // A box the arrow keys opened shows its chat only when you ask: Enter in the empty field, or a
+  // click on its title. On the way past nothing should move but the box, and not a click anywhere
+  // in it either (until 2026-11-18): you click the field to write, and the chat came up in the
+  // middle of your words.
+  if (!target.byArrows) engage()
+  title.addEventListener('click', () => engage('title'))
   // A setting (off unless you turn it on: without it, Enter in the empty field asks for the chat).
   // The arrow keys came to this chat and stayed: its tab is shown as if you had asked. Not on
   // the way past (each showing takes the keyboard away for a moment), and not once you type:
@@ -968,7 +973,11 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       exchange.replaceChildren()
       const when = data.at ? ` · ${clock(data.at)}` : ''
       if (data.prompt) exchange.append(section(t.previewYou, plain(data.prompt), 'you'))
-      if (data.message) exchange.append(section(t.previewAgent + when, plain(data.message), 'agent'))
+      if (data.message) {
+        const said = node('div', 'preview-agent')
+        said.append(node('div', 'preview-who', t.previewAgent + when), richText(data.message))
+        exchange.append(said)
+      }
       if (!data.prompt && !data.message && !data.screen) exchange.append(node('div', 'preview-text preview-empty', t.previewEmpty))
       // Orca's record is behind this chat's terminal: what is above is old, the screen is now.
       if (data.screen) {

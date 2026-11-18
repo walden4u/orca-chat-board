@@ -220,6 +220,13 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .preview-text { white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
 .preview-you .preview-text { color: var(--orca-muted-foreground); max-height: 8.7em; overflow: hidden; }
 .preview-empty { color: var(--orca-muted-foreground); font-style: italic; }
+/* A markdown table in the agent's reply (see richText in preview.ts). */
+.md-table-wrap { overflow-x: auto; margin: 8px 0; }
+/* keep-all: Korean wraps at spaces, not in the middle of a word ("추천" was cut "추 / 천"). */
+.md-table { border-collapse: collapse; white-space: normal; word-break: keep-all; overflow-wrap: anywhere; line-height: 1.4; }
+.md-table th, .md-table td { border: 1px solid var(--orca-border); padding: 4px 8px; text-align: left; vertical-align: top; }
+.md-table th { font-weight: 600; background: color-mix(in srgb, var(--orca-muted-foreground) 12%, transparent); }
+.md-table tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--orca-muted-foreground) 5%, transparent); }
 
 /* Takes the click made to bring the keyboard back to the reply box, so it presses no button. */
 .reply-sheet { position: fixed; inset: 0; z-index: 200; background: transparent; }
@@ -230,7 +237,8 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
   border: 1px solid var(--orca-border); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
 .reply-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; flex: none;
   border-bottom: 1px solid var(--orca-border); }
-.reply-title { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply-title { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.reply-title:hover { text-decoration: underline; text-underline-offset: 3px; }
 .reply-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px;
   user-select: text; }
 .reply-body > * { flex: none; }

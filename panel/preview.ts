@@ -58,6 +58,61 @@ export function plain(text: string): string {
     .trim()
 }
 
+const TABLE_ROW = /^\s*\|.*\|\s*$/
+const TABLE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/
+const cellsOf = (row: string) =>
+  row
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/(?<!\\)\|$/, '')
+    .split(/(?<!\\)\|/)
+    .map((c) => c.trim().replace(/\\\|/g, '|'))
+
+/**
+ * The agent's reply as the reply box shows it: plain text (see `plain`), with its markdown tables
+ * drawn as tables. As text, "| a | b |" rows are hard to read in a narrow panel (2026-11-18).
+ */
+export function richText(text: string): HTMLElement {
+  const box = document.createElement('div')
+  box.className = 'preview-text'
+  const lines = plain(text).split('\n')
+  let run: string[] = []
+  // The blank lines around a table are the table's margin.
+  const flush = () => {
+    const words = run.join('\n').replace(/^\n+|\n+$/g, '')
+    if (words) box.append(document.createTextNode(words))
+    run = []
+  }
+  for (let i = 0; i < lines.length; i++) {
+    if (!(TABLE_ROW.test(lines[i]!) && TABLE_RULE.test(lines[i + 1] ?? ''))) {
+      run.push(lines[i]!)
+      continue
+    }
+    flush()
+    const table = document.createElement('table')
+    table.className = 'md-table'
+    const top = table.createTHead().insertRow()
+    for (const cell of cellsOf(lines[i]!)) {
+      const th = document.createElement('th')
+      th.textContent = cell
+      top.append(th)
+    }
+    const rows = table.createTBody()
+    for (i += 2; i < lines.length && TABLE_ROW.test(lines[i]!); i++) {
+      const row = rows.insertRow()
+      for (const cell of cellsOf(lines[i]!)) row.insertCell().textContent = cell
+    }
+    i--
+    // Wider than the panel: it scrolls sideways on its own, the text around it does not.
+    const wrap = document.createElement('div')
+    wrap.className = 'md-table-wrap'
+    wrap.append(table)
+    box.append(wrap)
+  }
+  flush()
+  return box
+}
+
 const head = (s: string, n: number) => (s.length > n ? s.slice(0, n).trimEnd() + '…' : s)
 
 /** Your last prompt and the agent's last reply, from Orca; `fresh` skips the few seconds of cache. */
