@@ -925,7 +925,12 @@ export default function activate(orca: OrcaWorkerApi): void {
     const card = (await loadBoard()).cards[key]
     if (!card) return
     const handle = await launchAgent(card.worktreeId, 'claude', focus)
-    const { terminals } = await listTerminals()
+    let { terminals } = await listTerminals()
+    // Launched while Orca's window is still starting, it may have no tab yet: given one.
+    if (terminals.find((t) => t.handle === handle)?.orphaned) {
+      await switchTerminal(handle).catch(() => undefined)
+      ;({ terminals } = await listTerminals())
+    }
     const tab = terminals.find((t) => t.handle === handle)?.tabId
     if (tab) await mutate((s) => adoptCard(s, key, tab))
     // The rest takes Claude's start-up time, longer than a panel waits for an answer: it goes on
@@ -948,12 +953,29 @@ export default function activate(orca: OrcaWorkerApi): void {
    * its own conversation, in the background. Only with the setting on, only chats whose session
    * the board had noted, and never after a mere reload of this worker (same run of Orca).
    */
+  /** Gives each terminal that no tab holds a tab of its own (`terminal switch` does), then lists again. */
+  async function adoptOrphans(): Promise<void> {
+    const { terminals } = await listTerminals()
+    const orphans = terminals.filter((t) => t.orphaned)
+    if (!orphans.length) return
+    for (const t of orphans) await switchTerminal(t.handle).catch(() => undefined)
+    orca.log(`gave a tab to ${orphans.length} terminal(s) that had none`)
+    await resync()
+  }
+
   async function restoreAfterRestart(gone: string[]): Promise<void> {
     const run = orcaRuntimeId()
     if (!run) return
     const last = await orca.storage.get(RUNTIME_KEY)
     if (last === run) return
     await orca.storage.set(RUNTIME_KEY, run)
+    // Orca started again with terminals of its last run (its daemon keeps them), and on 2026-11-19
+    // left five of them out of its window: no tab, so the server's web client had none either and
+    // the other machine's board could not show them. Each is given its tab (its card follows, by
+    // its pty), now and a little later, should the window still be on its way.
+    for (const wait of [0, 15_000, 60_000]) {
+      setTimeout(() => void adoptOrphans().catch((err) => orca.log(`terminals without a tab not taken in: ${(err as Error).message.split('\n').pop()}`)), wait)
+    }
     if (typeof last !== 'string' || !gone.length || !(await restoreOn())) return
     let opened = 0
     for (const key of gone) {

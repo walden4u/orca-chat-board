@@ -15,6 +15,11 @@ export type LiveTerminal = {
   tabTitle?: string | null
   /** An Orca chat tab (no terminal): its chat session id. */
   sessionId?: string | null
+  /**
+   * A terminal no tab of Orca's window holds (its `tabId` is then `pty:…`): seen after Orca started
+   * again (2026-11-19). The server's web client has no tab for it either.
+   */
+  orphaned?: boolean
 }
 
 const COLUMN_TITLES = {
