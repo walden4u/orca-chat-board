@@ -960,14 +960,14 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       if (moved) for (const ms of [700, 1500, 3000]) setTimeout(() => void (open && !hasKeys() && takeBack(target.auto && how === 'open')), ms)
     })
   }
-  // On this board a box that opened by itself shows its chat at once too (asked for on
-  // 2026-11-16): the chat that just finished is what you want to read. The keyboard goes to
-  // the chat's tab with it, and comes back to this box by the click made for you.
-  // A box the arrow keys opened shows its chat only when you ask: Alt+Enter, or a click on its
-  // title. On the way past nothing should move but the box, and not a click anywhere
-  // in it either (until 2026-11-18): you click the field to write, and the chat came up in the
-  // middle of your words.
-  if (!target.byArrows) engage()
+  // A box that opened by itself or by the arrow keys shows its chat only when you ask: Alt+Enter,
+  // or a click on its title. On the way past nothing should move but the box, and not a click
+  // anywhere in it either (until 2026-11-18): you click the field to write, and the chat came up
+  // in the middle of your words. A box that opened by itself showed its chat at once (asked for
+  // on 2026-11-16) until the same day: the keys went to the chat's browser tab with it, three
+  // times in five they were not back in the box for its first 4 s, and the box shows the reply
+  // anyway. Now as on the server's own board.
+  if (!target.auto && !target.byArrows) engage()
   title.addEventListener('click', () => engage('title'))
   // A setting (off unless you turn it on: without it, Alt+Enter or the title asks for the chat).
   // The arrow keys came to this chat and stayed: its tab is shown as if you had asked. Not on
