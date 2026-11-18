@@ -1007,6 +1007,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   // (`~/.orca/keybindings.json`: "plugin:local.chat-board/board.keys"), or from the command palette.
   // The panel does it (see `bringKeys`); a panel that is not open hears nothing.
   orca.commands.register('board.keys', () => {
+    orca.log('command board.keys ran')
     orca.panels.post('keys.bring', null)
   })
 
