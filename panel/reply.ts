@@ -915,7 +915,10 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
           // Refused at once (no spot remembered yet, no helper): not asked again in a hurry.
           if (!brought && Date.now() - asked < 2000) await pause(3000)
         }
-        if (!brought) what = hasKeys() ? 'back by your own click' : 'with the terminal, pointer elsewhere and not brought here'
+        // Your own click ended the wait: its keys land a moment later (see the box's `click`).
+        if (stopped && !brought) await pause(300)
+        if (!brought)
+          what = hasKeys() ? 'back by your own click' : stopped ? 'your own click in the box, keys not in its field' : 'with the terminal, pointer elsewhere and not brought here'
         else {
           await pause(150)
           // The panel felt the pointer arrive, or the spot is no longer on it: then no click.
@@ -941,6 +944,17 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     },
     true
   )
+  // A click on a bare part of the box (its text, its edges) puts the keys in its field, so that
+  // the arrow keys, Enter and what you type work from there. A click elsewhere in a page leaves
+  // the keys nowhere; seen on 2026-11-18 (b9): a box that opened by itself, clicked to get the keys
+  // back, and they were not in its field. Not on a button, the field, the title, nor when the click
+  // ended a selection of text (to copy it).
+  dialog.addEventListener('click', (e) => {
+    if (!open || readOnly) return
+    if ((e.target as HTMLElement).closest('button, textarea, input, select, a, label, .reply-title')) return
+    if (window.getSelection()?.toString()) return
+    input.focus({ preventScroll: true })
+  })
   // A box that opened by itself takes the keys too: at once when this panel has them anyway,
   // and otherwise by that click, once you are not typing.
   if (!readOnly && target.auto) {
