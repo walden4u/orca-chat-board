@@ -19,12 +19,13 @@ export function steerScript(worktreeId: string, tabId: string): string {
     'const side = () => document.querySelector("[data-worktree-sidebar]");',
     // A page just opened is still loading; one that asks for a pairing code will not get further.
     'const asks = () => /pairing/i.test((document.body && document.body.innerText || "").slice(0, 400));',
-    // With its sidebar hidden (as in a narrow tab) the page has no list of workspaces at all.
-    'const loaded = () => side() || document.querySelector("[data-rendered-active-worktree-id],[data-terminal-workbench-container]");',
-    'for (let i = 0; i < 80 && !loaded() && !asks(); i++) await sleep(100);',
-    'if (!loaded()) return asks() ? "not-paired" : "not-ready";',
     // The sidebar's own button: the first labelled one of the title bar, whatever the language.
     'const toggle = () => [...document.querySelectorAll("button[aria-label]:not([aria-hidden=true])")].filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.top >= 0 && r.top < 40 && !b.closest("[data-worktree-sidebar-container],[data-worktree-sidebar],[data-tab-id]"); }).sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left)[0];',
+    // With its sidebar hidden (as in a narrow tab) the page has no list of workspaces at all, and
+    // with no workspace open nothing else of it either (seen 2026-11-18): its title bar is enough.
+    'const loaded = () => side() || document.querySelector("[data-rendered-active-worktree-id],[data-terminal-workbench-container]") || (document.readyState === "complete" && !asks() && toggle());',
+    'for (let i = 0; i < 80 && !loaded() && !asks(); i++) await sleep(100);',
+    'if (!loaded()) return asks() ? "not-paired" : "not-ready";',
     'let opened = false;',
     // Only the sidebar's rows: a workspace opened before has hidden tab strips with the same id.
     'const findRow = () => [...(side() ? side().querySelectorAll("[data-worktree-id]") : [])].find((r) => norm(r.getAttribute("data-worktree-id")) === want);',
