@@ -318,6 +318,7 @@ export default function activate(orca: OrcaWorkerApi): void {
         })
         return
       }
+      if (said.what === 'page-hidden') return orca.panels.post('chat.hidden' as never, null as never)
       // What the page did about the keys, for the log.
       if (said.what !== 'key') return tellServer(`chat screen: ${String(said.what)}`)
       tellServer('Alt+K in the web tab')

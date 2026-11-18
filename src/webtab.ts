@@ -83,8 +83,8 @@ export function keyHook(url: string, token: string, from: string): string {
     // The first version of this hook (its listener cannot be taken out) is silenced.
     // Earlier versions of this hook (their listeners cannot be taken out) are silenced: change the
     // name whenever the listeners change, or a page that has the old ones never gets the new.
-    'for (const old of ["__chatBoardKeys", "__chatBoardKeys2"]) if (window[old]) window[old].url = "";',
-    'const kb = window.__chatBoardKeys3 || (window.__chatBoardKeys3 = {});',
+    'for (const old of ["__chatBoardKeys", "__chatBoardKeys2", "__chatBoardKeys3"]) if (window[old]) window[old].url = "";',
+    'const kb = window.__chatBoardKeys4 || (window.__chatBoardKeys4 = {});',
     'kb.post = (what) => fetch(kb.url, { method: "POST", mode: "no-cors", body: JSON.stringify({ token: kb.token, from: kb.from, what }) }).catch(() => {});',
     'if (!kb.on) { kb.on = true; window.addEventListener("keydown", (e) => {',
     '  if (!kb.url || !e.altKey || e.ctrlKey || e.shiftKey || e.metaKey || e.code !== "KeyK") return;',
@@ -105,7 +105,10 @@ export function keyHook(url: string, token: string, from: string): string {
     '    setTimeout(() => { const ta = term.querySelector(".xterm-helper-textarea"); if (ta && document.activeElement !== ta) { ta.focus({ preventScroll: true }); kb.post(document.activeElement === ta ? "focus-fixed" : "focus-not-fixed"); } }, 80);',
     '    if (Date.now() - (kb.markedAt || 0) < 2000) return;',
     '    kb.markedAt = Date.now(); kb.post("mark");',
-    '  }, true); }',
+    '  }, true);',
+    // Orca put another tab in this one's place: a click made at the spot of the terminal would
+    // land on that one, so the board shows the chat again first.
+    '  document.addEventListener("visibilitychange", () => { if (kb.url && document.hidden) kb.post("page-hidden"); }); }',
     `kb.url = ${JSON.stringify(url)}; kb.token = ${JSON.stringify(token)}; kb.from = ${JSON.stringify(from)};`
   ].join(' ')
 }

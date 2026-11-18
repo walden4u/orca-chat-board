@@ -260,9 +260,16 @@ const isEditing = () => {
 async function load(refresh: boolean): Promise<void> {
   setView(await request<BoardView>('board.get', { refresh, locale }))}
 
+/**
+ * The chat this board last showed in the browser tab here. The server's own idea of the tab on
+ * screen (`active`) is its window's, not this machine's: this is what Alt+K goes by.
+ */
+let shownHere: string | null = null
+
 async function focusChat(c: CardView): Promise<void> {
   if (c.closed) return
   const r = await request<{ ok: boolean; error: string | null }>('chat.focus', { key: c.key })
+  if (r?.ok) shownHere = c.key
   if (r && !r.ok) showFlash(r.error === 'closed' ? t.chatClosed : (r.error ?? t.focusFailed))
   else if (r?.ok && r.error === 'chat-workspace') showFlash(t.chatTabOpened, true)
   else if (r?.ok && view) {
@@ -425,6 +432,7 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
         })
         // Seen on the server's log too: the showing happens on this machine only.
         if (r) trace(`reply show ${id} (${how}): ${r.ok ? 'ok' : (r.error ?? 'passed over')} in ${Date.now() - began} ms`)
+        if (r?.ok) shownHere = c.key
         if (r?.ok && view && r.error !== 'chat-workspace') {
           for (const x of view.cards) x.active = x.key === c.key
           render()
@@ -1196,9 +1204,17 @@ function boot(): void {
       letKeysGo()
       // Orca shows the chat screen but leaves the keys here when that browser tab is on screen
       // already (b9, 2026-11-18): a click is made for you where you last clicked in its terminal.
-      void focusChat(c)
+      // The chat on screen there already (asked for by this board last): no showing it again,
+      // which takes 1.5 s or more, only the click (2026-11-18: "can it be quicker?").
+      const there = shownHere === c.key
+      const began = Date.now()
+      void (there ? Promise.resolve() : focusChat(c))
         .then(() => replyMouse('to-chat'))
-        .then((clicked) => trace(`keys to the terminal by the shortcut: ${c.key.slice(0, 8)}, ${clicked ? 'clicked into the chat screen' : 'no click made'}`))
+        .then((clicked) =>
+          trace(
+            `keys to the terminal by the shortcut: ${c.key.slice(0, 8)}, ${there ? 'on screen already, ' : ''}${clicked ? 'clicked into the chat screen' : 'no click made'} in ${Date.now() - began} ms`
+          )
+        )
         .finally(() => {
           handing = false
           handedAt = Date.now()
@@ -1206,6 +1222,10 @@ function boot(): void {
     },
     true
   )
+  // The browser tab with the chat screen went out of sight: Alt+K shows the chat again before clicking.
+  orca.plugin.on('chat.hidden', () => {
+    shownHere = null
+  })
   orca.plugin.on('keys.bring', () => {
     // Should Orca's shortcut fire too for the key just taken here, the keys are not pulled back.
     if (Date.now() - handedAt < 800) return

@@ -37,7 +37,9 @@ test('the key hook posts Alt+K once, only Alt+K, and swallows it; run again it o
       return null
     }
   }
-  const run = (hook: string): void => new Function('window', 'fetch', 'Element', hook)(win, fetch, Element)
+  const seen: (() => void)[] = []
+  const doc = { hidden: false, activeElement: null, addEventListener: (_: string, f: () => void) => seen.push(f) }
+  const run = (hook: string): void => new Function('window', 'fetch', 'Element', 'document', hook)(win, fetch, Element, doc)
   const body = JSON.stringify({ token: 't"k', from: 'me', what: 'key' })
   run(keyHook('http://a:4927/key', 't"k', 'me'))
   run(keyHook('http://b:4927/key', 't"k', 'me'))
@@ -65,6 +67,13 @@ test('the key hook posts Alt+K once, only Alt+K, and swallows it; run again it o
   marks[0]({ isTrusted: true, button: 0, target: new Element(true) })
   assert.equal(posts.length, 2)
   assert.equal(JSON.parse(posts[1][1].body).what, 'mark')
+  // Out of sight is told; back in sight is not (the board shows the chat itself then).
+  assert.equal(seen.length, 1)
+  seen[0]()
+  assert.equal(posts.length, 2)
+  doc.hidden = true
+  seen[0]()
+  assert.equal(JSON.parse(posts[2][1].body).what, 'page-hidden')
   const script = (await import('./webtab.ts')).steerScript('w', 't', keyHook('http://a/key', 't', 'me'))
   assert.equal(script.includes('\n'), false)
   assert.equal(typeof new Function(`return ${script}`), 'function')
