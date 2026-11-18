@@ -6,7 +6,7 @@ import type { OrcaWorkerApi } from 'orca/worker'
 import { orcaEnvironment, setOrcaEnvironment, type RemoteTrouble } from './cli.ts'
 import { askServer, forgetDoor, isDirect, isListening, keepListening, onServerEvent } from './direct.ts'
 import { unseenHere, type SeenCard } from './unseen.ts'
-import { forgetWebTab, showChatInWebTab } from './webtab.ts'
+import { forgetWebTab, lastSteps, showChatInWebTab } from './webtab.ts'
 import { keys, keysWhy, markedSpot, setMarkedSpot, type KeysOp } from './keys.ts'
 
 /** The Chat Board on the server: a development plugin, which is what `plugin dev request` can call. */
@@ -139,33 +139,48 @@ export default function activate(orca: OrcaWorkerApi): void {
   let lastAsked = 0
   let showTurn: Promise<void> = Promise.resolve()
 
+  /** Longest a chat being shown keeps the next one waiting: a command that hangs must not hold up all after it. */
+  const SHOW_TURN_MS = 12_000
+  /** A chat that waited this long is not shown any more: its box has stopped waiting (30 s). */
+  const SHOW_STALE_MS = 20_000
+
   async function showHere(key: string): Promise<Shown | null> {
     const place = placeOf[key]
     if (!place || !place.worktreeId) return null
     const mine = ++lastAsked
+    const asked = Date.now()
     const before = showTurn
     let done = (): void => undefined
     showTurn = new Promise<void>((free) => (done = free))
     await before
+    const release = setTimeout(done, SHOW_TURN_MS)
     try {
       // Another chat was asked for while this one waited: this one is passed over.
       if (mine !== lastAsked) return { ok: false, error: null }
+      if (Date.now() - asked > SHOW_STALE_MS) {
+        tellServer(`chat ${key.slice(0, 8)} not shown here: waited ${Date.now() - asked} ms for the one before`)
+        return { ok: false, error: null }
+      }
       return await showNow(key, place)
     } finally {
+      clearTimeout(release)
       done()
     }
   }
 
   async function showNow(key: string, place: Place): Promise<Shown | null> {
     let answer: string
+    const began = Date.now()
     try {
       // A card's key is its tab's id on the server, which the web client's tabs carry too.
       answer = await showChatInWebTab(place.worktreeId, key)
     } catch (err) {
       answer = (err as Error).message.split('\n').pop() ?? ''
     }
+    const line = `chat ${key.slice(0, 8)} ${answer === 'ok' ? 'shown here' : `not shown here: ${answer.slice(0, 80)}`} in ${Date.now() - began} ms (${lastSteps()})`
+    orca.log(line)
+    tellServer(line)
     if (answer !== 'ok') {
-      orca.log(`chat ${key.slice(0, 8)} not shown here: ${answer}`)
       return { ok: false, error: WHY[answer] ?? answer }
     }
     // What the server's worker does after showing a chat: it counts as seen.

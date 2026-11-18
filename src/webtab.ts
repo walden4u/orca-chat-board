@@ -91,10 +91,23 @@ async function webTab(url: string): Promise<string> {
  */
 export async function showChatInWebTab(worktreeId: string, tabId: string, webUrl?: string): Promise<WebTabResult> {
   const script = steerScript(worktreeId, tabId)
+  steps = []
+  // How long each command took, for the log: a slow one holds up every chat asked for after it.
+  const timed = async <T>(name: string, run: Promise<T>): Promise<T> => {
+    const began = Date.now()
+    try {
+      const out = await run
+      steps.push(`${name} ${Date.now() - began} ms`)
+      return out
+    } catch (err) {
+      steps.push(`${name} failed after ${Date.now() - began} ms`)
+      throw err
+    }
+  }
   // The tab is shown whatever the page answers: a page that asks for a pairing code has to be seen
   // too. Steering it and bringing it forward are separate commands, run together.
   const steer = async (tab: string, workspace: string): Promise<string> =>
-    (await Promise.all([evalInBrowserTab(tab, script), showBrowserTab(tab, workspace)]))[0]
+    (await Promise.all([timed('page', evalInBrowserTab(tab, script)), timed('switch', showBrowserTab(tab, workspace))]))[0]
   if (page && home) {
     try {
       return (await steer(page, home)) as WebTabResult
@@ -102,8 +115,14 @@ export async function showChatInWebTab(worktreeId: string, tabId: string, webUrl
       // The remembered tab was closed: it is looked for again below.
     }
   }
-  page = await webTab(webUrl ?? webUrlOf(await serverEndpoint()))
+  page = await timed('find', webTab(webUrl ?? webUrlOf(await serverEndpoint())))
   return (await steer(page, home!)) as WebTabResult
+}
+
+/** The commands of the last `showChatInWebTab` and how long each took. */
+let steps: string[] = []
+export function lastSteps(): string {
+  return steps.join(', ')
 }
 
 /** Forgets the browser tab: the server shown has changed. */
