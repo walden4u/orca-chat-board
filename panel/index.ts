@@ -7,7 +7,7 @@ import { STATUS_ICON, type StatusKind } from './icons.ts'
 import { locale, setLanguage, t } from './i18n.ts'
 import { isStale } from '../src/monitor.ts'
 import { heldByKeys, hidePreview, schedulePreview } from './preview.ts'
-import { SHOWING_TAKES_KEYS, bringKeys, closeReply, focusReply, openReply, pointerOverPanel, replyKey, setReplyMouse, type MouseOp, setReplyChat, setReplyJudge, setReplyWaiting } from './reply.ts'
+import { SHOWING_TAKES_KEYS, bringKeys, closeReply, focusReply, letKeysGo, openReply, pointerOverPanel, replyKey, setReplyMouse, type MouseOp, setReplyChat, setReplyJudge, setReplyWaiting } from './reply.ts'
 
 const INTERRUPTED = new Set(['interruption', 'failure', 'cancellation'])
 
@@ -1175,7 +1175,30 @@ function boot(): void {
   orca.plugin.on('board.changed', (next) => setView(next as BoardView))
   // Your shortcut for the board: the keys come back from a terminal, to the open reply box, or
   // else to the card they were on (or the first chat that waits for your answer).
+  // The same shortcut pressed here, on the board or in a reply box, hands the keys to the chat's
+  // terminal (asked for on 2026-11-18: one key there and back). Orca's own shortcut does not fire
+  // while the keys are in this panel (seen on b9), so the panel takes the key itself.
+  let handedAt = 0
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (!e.altKey || e.ctrlKey || e.shiftKey || e.metaKey || e.code !== 'KeyK') return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      if (e.repeat) return
+      const key = replyKey() ?? pickedKey
+      const c = key ? view?.cards.find((x) => x.key === key) : undefined
+      if (!c || c.closed) return trace(`keys to the terminal by the shortcut: ${c ? 'its chat is closed' : 'no chat picked'}`)
+      handedAt = Date.now()
+      // The box stays as it is, but no longer reaches for the keys once its chat has them.
+      letKeysGo()
+      void focusChat(c).then(() => trace(`keys to the terminal by the shortcut: ${c.key.slice(0, 8)}`))
+    },
+    true
+  )
   orca.plugin.on('keys.bring', () => {
+    // Should Orca's shortcut fire too for the key just taken here, the keys are not pulled back.
+    if (Date.now() - handedAt < 800) return
     void bringKeys(() => {
       if (focusReply()) return
       const cards = [...document.querySelectorAll<HTMLElement>('.board .card')]

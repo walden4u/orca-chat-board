@@ -171,6 +171,14 @@ export async function bringKeys(land: () => void): Promise<string> {
   return clicked ? `back by a click${how}` : `clicked, but not here${how}`
 }
 
+/** When you last handed the keys to a terminal with the shortcut: no box reaches for them a while after. */
+let letGoAt = 0
+const LET_GO_MS = 5000
+export function letKeysGo(): void {
+  letGoAt = Date.now()
+  void mouse('cancel')
+}
+
 /** Puts the keys in the open reply box (its field, or the box itself when it cannot be written in). False with no box. */
 export function focusReply(): boolean {
   return current?.focus() ?? false
@@ -905,6 +913,7 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   // takes them without this frame ever hearing of it (seen 2026-11-17: "kept", and they were not).
   const takeBack = async (whenStill = false, force = false) => {
     if (!open || readOnly || busy || taking) return
+    if (Date.now() - letGoAt < LET_GO_MS) return handlers.onKeys('left with the terminal, handed there by the shortcut')
     const have = () => !force && hasKeys()
     if (have()) return handlers.onKeys('kept')
     taking = true
@@ -935,8 +944,9 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       } else {
         // One wait of the worker is short (a request has 30 s); the box goes on asking while it
         // is open and the keys are elsewhere, for as long as you may reasonably be away.
-        const until = Date.now() + 30 * 60_000
-        while (open && !brought && !have() && !stopped && Date.now() < until) {
+        const began = Date.now()
+        const until = began + 30 * 60_000
+        while (open && !brought && !have() && !stopped && letGoAt < began && Date.now() < until) {
           const asked = Date.now()
           brought = await mouse('move')
           // Refused at once (no spot remembered yet, no helper): not asked again in a hurry.
