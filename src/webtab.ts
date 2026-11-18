@@ -64,6 +64,10 @@ export function steerScript(worktreeId: string, tabId: string, hook = ''): strin
     '  tab.dispatchEvent(new PointerEvent("pointerup", u)); tab.dispatchEvent(new MouseEvent("mouseup", u)); tab.dispatchEvent(new MouseEvent("click", u));',
     '  for (let i = 0; i < 10 && (findTab() || tab).getAttribute("data-active") !== "true"; i++) await sleep(100);',
     '}',
+    // The keys into the chat's terminal in the page, should this tab of Orca have them (Alt+K from
+    // the board): the hidden tabs' terminals are not drawn, so the one drawn is this chat's.
+    'const ta = [...document.querySelectorAll(".xterm-helper-textarea")].find((x) => x.closest(".xterm") && x.closest(".xterm").offsetParent);',
+    'if (ta) ta.focus({ preventScroll: true });',
     'return (findTab() || tab).getAttribute("data-active") === "true" ? "ok" : "tab-not-active";'
   ].join(' ')
   return `(async () => { ${body} })()`
