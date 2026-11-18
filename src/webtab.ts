@@ -81,8 +81,10 @@ export function steerScript(worktreeId: string, tabId: string, hook = ''): strin
 export function keyHook(url: string, token: string, from: string): string {
   return [
     // The first version of this hook (its listener cannot be taken out) is silenced.
-    'if (window.__chatBoardKeys) window.__chatBoardKeys.url = "";',
-    'const kb = window.__chatBoardKeys2 || (window.__chatBoardKeys2 = {});',
+    // Earlier versions of this hook (their listeners cannot be taken out) are silenced: change the
+    // name whenever the listeners change, or a page that has the old ones never gets the new.
+    'for (const old of ["__chatBoardKeys", "__chatBoardKeys2"]) if (window[old]) window[old].url = "";',
+    'const kb = window.__chatBoardKeys3 || (window.__chatBoardKeys3 = {});',
     'kb.post = (what) => fetch(kb.url, { method: "POST", mode: "no-cors", body: JSON.stringify({ token: kb.token, from: kb.from, what }) }).catch(() => {});',
     'if (!kb.on) { kb.on = true; window.addEventListener("keydown", (e) => {',
     '  if (!kb.url || !e.altKey || e.ctrlKey || e.shiftKey || e.metaKey || e.code !== "KeyK") return;',
