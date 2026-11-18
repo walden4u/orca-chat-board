@@ -1190,8 +1190,8 @@ function boot(): void {
   document.addEventListener(
     'keydown',
     (e) => {
-      // Ctrl+' (Alt+K until 2026-11-18, changed at your word).
-      if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || e.code !== 'Quote') return
+      // Alt+' (Alt+K until 2026-11-18, changed at your word).
+      if (!e.altKey || e.ctrlKey || e.shiftKey || e.metaKey || e.code !== 'Quote') return
       e.preventDefault()
       e.stopImmediatePropagation()
       // Pressed again while the chat is still being shown (a second or two here): once is enough.
