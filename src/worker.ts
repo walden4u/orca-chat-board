@@ -256,6 +256,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   // this command in Orca (`~/.orca/keybindings.json`: "plugin:local.chat-board-remote/board.keys"),
   // or from the command palette. This machine's panel does it (see `bringKeys`), never the server's.
   orca.commands.register('board.keys', () => {
+    tellServer('command board.keys ran here')
     orca.panels.post('keys.bring' as never, null as never)
   })
 
