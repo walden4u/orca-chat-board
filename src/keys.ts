@@ -194,6 +194,13 @@ export function setMarkedChatSpot(next: unknown): void {
   const s = next as { x?: unknown; y?: unknown } | null
   chatSpot = s && typeof s.x === 'number' && typeof s.y === 'number' ? { x: s.x, y: s.y } : null
 }
+/**
+ * When `to-chat` last clicked. The page tells of that click as of yours, but by the time it is
+ * told the pointer is back where it was: taken as yours, the spot became that place, and every
+ * Alt+' after the first clicked there (b9, 2026-11-19 13:15). Told this soon after, it is ours.
+ */
+let toChatAt = 0
+const OWN_CLICK_MS = 1500
 let why = ''
 
 /** Why the last step was not done, for the log. */
@@ -253,6 +260,8 @@ const defaultClicker: Clicker = async (op) => {
     return true
   }
   if (op === 'mark-chat') {
+    // The board's own click: the spot stays as it is.
+    if (Date.now() - toChatAt < OWN_CLICK_MS) return true
     const [said, x, y] = (await ask('k')).split(' ')
     if (said !== 'ok') return (why = 'the helper could not tell where the pointer is'), false
     chatSpot = { x: Number(x), y: Number(y) }
@@ -260,12 +269,14 @@ const defaultClicker: Clicker = async (op) => {
   }
   if (op === 'to-chat') {
     if (!chatSpot) return (why = 'no click in the chat screen remembered yet: click once in its terminal'), false
+    toChatAt = Date.now()
     if (!(await step(`m ${chatSpot.x} ${chatSpot.y}`))) return false
     await new Promise((r) => setTimeout(r, 60))
     const clicked = await step('c')
     const said = why
     await new Promise((r) => setTimeout(r, 60))
     await step('r')
+    toChatAt = Date.now()
     why = said
     return clicked
   }
