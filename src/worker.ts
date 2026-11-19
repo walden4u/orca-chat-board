@@ -212,7 +212,10 @@ export default function activate(orca: OrcaWorkerApi): void {
       const began = Date.now()
       // Its box opened here, or it was answered from here: seen on this machine.
       if (name === 'card.seen' || name === 'chat.send') sawHere(String((input as { key?: unknown } | null)?.key ?? ''))
-      const result = await ask(name, input)
+      // Seen on this machine only (a box that opened by itself, nobody at it yet): the server's
+      // board keeps its own mark, and opens that chat's box there too.
+      const hereOnly = name === 'card.seen' && (input as { hereOnly?: unknown } | null)?.hereOnly === true
+      const result = await (hereOnly ? ask('board.get', {}) : ask(name, input))
       // The slow ones are worth knowing: each is at least one command to the server.
       if (name === 'attach.put' || name === 'chat.send') orca.log(`${name} took ${Date.now() - began} ms`)
       // Most requests answer the whole board: the panel shows it, so it is what the next poll compares with.

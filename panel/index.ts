@@ -344,6 +344,28 @@ const putOff = new Map<string, number>()
 /** That while (2 minutes at first, "too long" said on 2026-11-18). */
 const PUT_OFF_MS = 60_000
 
+/**
+ * The chat of a box that opened by itself, seen here but not yet told to the server: told at your
+ * first key (a mouse click does not count: the mouse helper clicks too, with nobody there).
+ */
+let seenLater: string | null = null
+document.addEventListener(
+  'keydown',
+  (e) => {
+    if (!e.isTrusted || !seenLater || replyKey() !== seenLater) return
+    const key = seenLater
+    seenLater = null
+    void request<BoardView>('card.seen', { key }).then((v) => setView(v))
+  },
+  true
+)
+document.addEventListener('wheel', () => {
+  if (!seenLater || replyKey() !== seenLater) return
+  const key = seenLater
+  seenLater = null
+  void request<BoardView>('card.seen', { key }).then((v) => setView(v))
+}, { capture: true, passive: true })
+
 /** Seen: the box was answered, or you went to the chat itself. */
 function markSeen(key: string): void {
   endedOpen.delete(key)
@@ -384,12 +406,19 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
   if (before && before !== c.key) leftUnanswered(before)
   endedOpen.delete(c.key)
   putOff.delete(c.key)
+  if (seenLater && seenLater !== c.key) seenLater = null
   if (c.unseenAt) {
     // Read here counts as seen (it leaves the queue too), at once and then in the worker.
     readHere.set(c.key, c.unseenAt)
     c.unseenAt = null
     render()
-    void request<BoardView>('card.seen', { key: c.key }).then((v) => setView(v))
+    // A box that opened by itself may have nobody before it: seen on this machine only, and on
+    // the server once you are at it (a key pressed). Told at once, it took the chat from the
+    // server's own board (2026-11-19: it never opened there, this machine's box went unread).
+    if (how === 'auto') {
+      seenLater = c.key
+      void request<BoardView>('card.seen', { key: c.key, hereOnly: true }).then((v) => setView(v))
+    } else void request<BoardView>('card.seen', { key: c.key }).then((v) => setView(v))
   }
   openReply(
     {
