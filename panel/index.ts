@@ -345,26 +345,26 @@ const putOff = new Map<string, number>()
 const PUT_OFF_MS = 60_000
 
 /**
- * The chat of a box that opened by itself, seen here but not yet told to the server: told at your
- * first key (a mouse click does not count: the mouse helper clicks too, with nobody there).
+ * The chat of a box that opened by itself, seen here but not yet told to the server: told once you
+ * are at it, by a key, the wheel, or a click of yours, closing it with the mouse too (asked for on
+ * 2026-11-19). The mouse helper's clicks land on its sheet (`.reply-sheet`): they do not count.
  */
 let seenLater: string | null = null
-document.addEventListener(
-  'keydown',
-  (e) => {
-    if (!e.isTrusted || !seenLater || replyKey() !== seenLater) return
-    const key = seenLater
-    seenLater = null
-    void request<BoardView>('card.seen', { key }).then((v) => setView(v))
-  },
-  true
-)
-document.addEventListener('wheel', () => {
+function tellSeen(): void {
   if (!seenLater || replyKey() !== seenLater) return
   const key = seenLater
   seenLater = null
   void request<BoardView>('card.seen', { key }).then((v) => setView(v))
-}, { capture: true, passive: true })
+}
+document.addEventListener('keydown', (e) => e.isTrusted && tellSeen(), true)
+document.addEventListener('wheel', () => tellSeen(), { capture: true, passive: true })
+document.addEventListener(
+  'pointerdown',
+  (e) => {
+    if (e.isTrusted && !(e.target as Element | null)?.closest?.('.reply-sheet')) tellSeen()
+  },
+  true
+)
 
 /** Seen: the box was answered, or you went to the chat itself. */
 function markSeen(key: string): void {
