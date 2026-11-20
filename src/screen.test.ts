@@ -1,6 +1,6 @@
 // What an agent's screen says: the lists it asks you to pick from.
 import { assert, test } from 'orca/testing'
-import { keysFor, looksBusy, menuOf } from './screen.ts'
+import { keysFor, keysForKey, looksBusy, menuOf } from './screen.ts'
 
 // Screens as `orca terminal read --screen` gave them (Claude Code 2.1.327, 2026-11-18).
 const RESUME = [
@@ -187,4 +187,46 @@ test('a prompt, a finished turn or a running one is no list', () => {
   // One option is not a choice.
   assert.equal(menuOf(['Sure?', '❯ 1. Yes', 'Enter to confirm · Esc to cancel']), null)
   assert.equal(menuOf([]), null)
+})
+
+// The list of models, as `/model` draws it (Claude Code 2.1.329, 2026-11-20).
+const MODELS = [
+  '  Select model',
+  '  Your pick is the default for new sessions. For other models, use --model.',
+  '    1.  Default (recommended)  Opus 5.5 · Best for everyday, complex tasks',
+  '    2.  Opus 5.5               For complex work and everyday tasks',
+  '  ❯ 3.  Fable 5.2 ✔            For your toughest challenges',
+  '    4.  Sonnet 5.5             Most efficient for simpler tasks',
+  '    5.  Haiku 5.5              Fastest for quick answers',
+  '    ▸   More models',
+  '  ● High effort ←/→ to adjust',
+  '  s to use this session only · Enter to save · Esc to cancel'
+]
+
+test('the keys a list names under its options: a setting to adjust, and the line about Enter and Esc', () => {
+  const menu = menuOf(MODELS)!
+  assert.deepEqual([menu.options.length, menu.at, menu.numbered], [5, 2, true])
+  assert.deepEqual(menu.under, ['● High effort ←/→ to adjust', 's to use this session only · Enter to save · Esc to cancel'])
+  assert.deepEqual(menu.keys, [
+    { press: 'left', says: '←', row: 0 },
+    { press: 'right', says: '→', row: 0 },
+    { press: 's', says: 's to use this session only', row: 1 },
+    { press: 'enter', says: 'Enter to save', row: 1 },
+    { press: 'esc', says: 'Esc to cancel', row: 1 }
+  ])
+  // Each is one write to the terminal; a letter or Enter after the pointer was moved to another option.
+  assert.deepEqual(keysForKey(menu, 'right'), ['\x1b[C'])
+  assert.deepEqual(keysForKey(menu, 'left'), ['\x1b[D'])
+  assert.deepEqual(keysForKey(menu, 'esc'), ['\x1b'])
+  assert.deepEqual(keysForKey(menu, 's'), ['s'])
+  assert.deepEqual(keysForKey(menu, 's', 3), ['\x1b[B', 's'])
+  assert.deepEqual(keysForKey(menu, 'enter', 0), ['\x1b[A\x1b[A', '\r'])
+  assert.deepEqual(keysForKey(menu, 'enter', 2), ['\r'])
+  // A key the screen does not name, or an option that is not there: nothing to press.
+  assert.equal(keysForKey(menu, 'x'), null)
+  assert.equal(keysForKey(menu, 's', 9), null)
+  // A permission request names Tab too, which is left to the terminal.
+  const asked = menuOf(['Do you want to proceed?', '❯ 1. Yes', '  2. No', '', 'Esc to cancel · Tab to amend'])!
+  assert.deepEqual(asked.keys, [{ press: 'esc', says: 'Esc to cancel', row: 0 }])
+  assert.equal(keysForKey(asked, 'enter'), null)
 })

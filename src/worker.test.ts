@@ -629,7 +629,17 @@ test("a list on the chat's screen is offered by the reply box and picked by its 
   const sends = () => calls.filter((c) => c[1] === 'send').map((c) => c.slice(4, -1))
 
   const seen = (await worker.request('chat.preview', { key: 'tab1', screen: true })) as { menu: unknown; suggestion: unknown }
-  assert.deepEqual(seen.menu, { question: 'Resume this conversation?', options: ['Resume', 'Start a new conversation'], at: 0, numbered: true })
+  assert.deepEqual(seen.menu, {
+    question: 'Resume this conversation?',
+    options: ['Resume', 'Start a new conversation'],
+    at: 0,
+    numbered: true,
+    under: ['Enter to confirm · Esc to resume'],
+    keys: [
+      { press: 'enter', says: 'Enter to confirm', row: 0 },
+      { press: 'esc', says: 'Esc to resume', row: 0 }
+    ]
+  })
   assert.equal(seen.suggestion, null, "the list's pointer is not a prompt waiting in the input")
 
   // Its number picks at once, and nothing else is pressed.
@@ -647,6 +657,21 @@ test("a list on the chat's screen is offered by the reply box and picked by its 
   assert.deepEqual(await worker.request('menu.pick', { key: 'tab1', index: 1, label: 'Yes, I trust this folder' }), { ok: true, error: null })
   assert.deepEqual(sends().slice(1), [['--text=\x1b[B'], ['--text=\r']])
   assert.deepEqual(await worker.request('menu.pick', { key: 'nope', index: 0, label: 'No, exit' }), { ok: false, error: 'closed' })
+
+  // The keys the screen names under its options are pressed as they are: a setting's arrow, a
+  // letter after the pointer was moved to the option you marked, Esc.
+  rows = ['Select model', '  1. Default', '❯ 2. Fable', '  3. Sonnet', '● High effort ←/→ to adjust', 's to use this session only · Enter to save · Esc to cancel']
+  const before = sends().length
+  assert.deepEqual(await worker.request('menu.key', { key: 'tab1', press: 'right' }), { ok: true, error: null })
+  assert.deepEqual(await worker.request('menu.key', { key: 'tab1', press: 's', to: 2, label: 'Sonnet' }), { ok: true, error: null })
+  assert.deepEqual(await worker.request('menu.key', { key: 'tab1', press: 'esc' }), { ok: true, error: null })
+  assert.deepEqual(sends().slice(before), [['--text=\x1b[C'], ['--text=\x1b[B'], ['--text=s'], ['--text=\x1b']])
+  // A key the screen does not name, or an option that is no longer where the box showed it: nothing is pressed.
+  assert.deepEqual(await worker.request('menu.key', { key: 'tab1', press: 'x' }), { ok: false, error: 'changed' })
+  assert.deepEqual(await worker.request('menu.key', { key: 'tab1', press: 's', to: 2, label: 'Haiku' }), { ok: false, error: 'changed' })
+  rows = ['● Done.', '❯ ']
+  assert.deepEqual(await worker.request('menu.key', { key: 'tab1', press: 'esc' }), { ok: false, error: 'changed' })
+  assert.equal(sends().length, before + 4)
   await worker.deactivate()
 })
 

@@ -295,6 +295,10 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .reply-menu-option.marked { border-color: var(--orca-primary); box-shadow: inset 3px 0 0 var(--orca-primary);
   background: color-mix(in srgb, var(--orca-primary) 22%, transparent); font-weight: 600; }
 .reply-menu-key { flex: none; font-weight: 700; color: var(--orca-muted-foreground); }
+/* What the screen says under its options, and the keys it names there. */
+.reply-menu-under { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.reply-menu-says { color: var(--orca-muted-foreground); }
+.reply-menu-press { border-color: var(--orca-border); padding: 2px 10px; }
 /* The commands offered while the field holds just "/word": a row a command, under them the row that reads yours again. */
 .reply-slash { display: flex; flex-direction: column; border: 1px solid var(--orca-border); border-radius: 4px; }
 .reply-slash-list { position: relative; display: flex; flex-direction: column; max-height: 12.5em; overflow-y: auto; }

@@ -211,6 +211,12 @@ declare module 'orca' {
      * are read the first time and with `refresh` (every open chat's folder then), never otherwise.
      */
     'commands.list': { input: { key: string; refresh?: boolean }; output: { commands: SlashCommand[]; at: number | null; error: string | null } }
+    /**
+     * Presses one of the keys the screen names for its list (`ScreenMenu.keys`): a setting's left or
+     * right arrow, a letter, Enter, Esc. With `to` and `label` (an option as the box showed it) the
+     * screen's pointer is moved to that option first. `changed` as for `menu.pick`.
+     */
+    'menu.key': { input: { key: string; press: string; to?: number; label?: string }; output: { ok: boolean; error: 'closed' | 'chat-tab' | 'changed' | string | null } }
     /** Turns the Workspace Board sync on or off (the same setting as in Orca's Settings). */
     'sync.set': { input: { on: boolean }; output: BoardView }
     /** Turns one of the plugin's on/off settings on or off (Orca's CLI cannot). */
