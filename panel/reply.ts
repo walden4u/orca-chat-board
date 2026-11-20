@@ -90,6 +90,8 @@ export type ReplyHandlers = {
 // In a reply box only left and right walk to another chat; up and down are the screen list's keys
 // (asked for on 2026-11-18, so that the box is worked with the keyboard alone).
 const SIDEWAYS: Record<string, number | undefined> = { ArrowLeft: -1, ArrowRight: 1 }
+/** How long after a "/" command a turn that begins counts as started by it. */
+const COMMAND_TURN_MS = 6000
 /** How far one press of up or down scrolls a box with no list on its chat's screen: about three lines. */
 const SCROLL_STEP_PX = 60
 
@@ -527,6 +529,8 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     const label = menu?.options[index]
     if (!open || picking || busy || label === undefined) return
     picking = true
+    // You answered what the command asked: whatever the chat does next, this box is not closed for it.
+    commandAt = 0
     showMenu()
     status.textContent = ''
     let result: { ok: boolean; error: string | null }
@@ -580,6 +584,8 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   /** What the list was last drawn for: the same text keeps where it was scrolled to. */
   let slashFor: string | null = null
   const REFRESH = 'refresh'
+  /** When a command you typed was sent from this box, which then stayed open (see `submit`). */
+  let commandAt = 0
   const rowKey = (r: SlashRow) => (r.refresh ? ' refresh' : r.name)
   const slashWord = (): string | null =>
     target.slash && !readOnly && !busy && input.value !== filled && input.value !== slashShut && /^\/\S*$/.test(input.value) ? input.value.slice(1) : null
@@ -886,6 +892,25 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       // The worker has the pictures now: nothing to forget there.
       for (const p of [...pictures]) removePicture(p, false)
       if (!keepField) input.value = ''
+      // A command of Claude Code that you typed ("/model", "/resume"…) often answers with a list
+      // on the chat's screen and starts no turn: nothing would open this box again for that list,
+      // and the next message would be typed into it (seen on 2026-11-20). So the box stays and
+      // reads the screen. A command that starts a turn after all (a skill, say) was a message like
+      // any other: the box then closes as it does after one (see `setChat`).
+      if (prepared === undefined && target.slash && /^\/\S/.test(text)) {
+        input.readOnly = false
+        send.textContent = t.send
+        refreshSend()
+        drafts.delete(target.key)
+        status.textContent = t.slashSent(text.split(/\s/)[0]!)
+        commandAt = Date.now()
+        showSlash()
+        advise()
+        input.focus()
+        handlers.onKeys(`a command was sent (${text.split(/\s/)[0]!.slice(0, 30)}), the box stays for what it shows`)
+        for (const ms of [300, 1500, 3500]) setTimeout(() => open && loadExchange(), ms)
+        return
+      }
       shutBox()
       handlers.onSent(target.title)
       return
@@ -1239,6 +1264,14 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     working = live.working
     turnAt = live.turnAt
     goal = live.goalFile
+    // The command sent from this box a moment ago started a turn: it was a message, the box closes
+    // as after any sent one. Not once you wrote something more in it.
+    if (commandAt && working && Date.now() - commandAt < COMMAND_TURN_MS && !busy && !input.value.trim() && !pictures.length) {
+      commandAt = 0
+      shutBox()
+      handlers.onSent(target.title)
+      return
+    }
     showHint()
     showGoal()
     showJudge(judge, tallyNow)
