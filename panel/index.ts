@@ -84,6 +84,8 @@ const show = { agent: true, workspace: true, status: true, time: true, notes: tr
 let autoCheck = true
 /** The "Show the chat in Orca with its reply box" setting. */
 let followChat = false
+/** A setting of its own: the box that opens after you sent or pressed Next shows its chat in Orca too. */
+let followNext = false
 /** A setting: the arrow keys open the reply box of the card they go to, and walk on from box to box. */
 let arrowsOpenReply = false
 /** A setting: a reply box the arrow keys opened shows its chat by itself once you stay on it. */
@@ -123,6 +125,7 @@ async function loadSettings(): Promise<void> {
     show.preview = s.showPreview !== false
     autoCheck = s.autoCheck !== false
     followChat = s.followChat === true
+    followNext = s.followNext === true
     arrowsOpenReply = s.arrowsOpenReply === true
     arrowsShowChat = s.arrowsShowChat === true
     pinkWaiting = s.pinkWaiting === true
@@ -370,6 +373,7 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
   hidePreview()
   const kind = statusOf(c)
   const id = c.key.slice(0, 8)
+  const next = how === 'next'
   trace(`reply open ${id} (${how}), ${waitingCards(c.key).length} waiting`)
   // This box takes the place of another one (the arrow keys, Next): that one was left as it was.
   const before = replyKey()
@@ -413,7 +417,8 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       onEngaged: async (how = 'open') => {
         // Asked for with Alt+Enter or the title, or by staying on the chat (a setting of its own):
         // shown whatever "show the chat beside the box" says.
-        if ((!followChat && how === 'open') || c.closed) return false
+        // A box you opened from its card and the one that follows a sent answer have a setting each.
+        if ((!(next ? followNext : followChat) && how === 'open') || c.closed) return false
         if (SHOWING_TAKES_KEYS) {
           // Already the tab on screen: nothing to show, and asking Orca to show it would hand the
           // keys to its terminal, which this box cannot get back without a click.

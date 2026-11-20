@@ -612,7 +612,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   // Orca's CLI cannot change a plugin's settings: this turns one of its switches on or off
   // (`orca plugin dev request local.chat-board setting.set --data='{"key":"followChat","on":false}'`).
   handle('setting.set', async ({ key, on }) => {
-    const switches = ['followChat', 'pinkWaiting', 'autoCheck', 'restoreChats', 'goalMode', 'autoMoveToInProgress', 'arrowsOpenReply', 'arrowsShowChat']
+    const switches = ['followChat', 'followNext', 'pinkWaiting', 'autoCheck', 'restoreChats', 'goalMode', 'autoMoveToInProgress', 'arrowsOpenReply', 'arrowsShowChat']
     if (typeof key !== 'string' || !switches.includes(key) || typeof on !== 'boolean') return { ok: false }
     await orca.settings.set(key, on)
     return { ok: true }
