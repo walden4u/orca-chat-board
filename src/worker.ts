@@ -120,6 +120,16 @@ type Status = {
   inferred?: boolean
 }
 
+/**
+ * Where the chat's turn is, for its unseen mark. Orca says "working" while background shells or
+ * subagents run on after the main agent's turn is over (its monitoring mode), but that turn's
+ * answer is out and may be waiting for you: the main agent's state counts then (2026-11-20, a
+ * checked chat asked a question at 9:50 with 2 agents still running, and no box opened).
+ */
+export function turnOf(state: AgentState, main: AgentState | null | undefined): AgentState {
+  return state === 'working' && main && main !== 'working' ? main : state
+}
+
 export default function activate(orca: OrcaWorkerApi): void {
   /** Live handle and last output of each card key, from the latest listing. */
   let handles: Record<string, string> = {}
@@ -278,10 +288,12 @@ export default function activate(orca: OrcaWorkerApi): void {
         if (!a.terminalId) continue
         const prev = status[a.terminalId]
         if (prev && prev.at >= a.stateStartedAt) continue
-        status[a.terminalId] = { state: a.state, at: a.stateStartedAt, outcome: null }
+        // This list does not tell the main agent's state: the one known is kept while the state holds.
+        const main = prev && prev.state === a.state ? (prev.main ?? null) : null
+        status[a.terminalId] = { state: a.state, at: a.stateStartedAt, outcome: null, main }
         const key = keyOfHandle(a.terminalId)
         // This list can be ahead of the event too (seen 2026-11-17: "done -> done, not news").
-        if (key && prev?.state === 'working' && a.state !== 'working') stopped.push({ key, handle: a.terminalId, at: a.stateStartedAt })
+        if (key && prev && turnOf(prev.state, prev.main) === 'working' && turnOf(a.state, main) !== 'working') stopped.push({ key, handle: a.terminalId, at: a.stateStartedAt })
       }
       await orca.storage.set(STATUS_KEY, status)
       return await noteStopped(state, stopped)
@@ -409,7 +421,7 @@ export default function activate(orca: OrcaWorkerApi): void {
           if (state.cards[tabId]?.watch && prev?.state !== a.state) orca.log(`checked chat ${tabId.slice(0, 8)}: ${prev?.state ?? 'no record'} -> ${a.state}, from a listing`)
           // This listing can be ahead of the event for the same change (events wait their turn
           // behind a refresh). The event then finds nothing new, so the turn's end is noted here.
-          if (prev?.state === 'working' && a.state !== 'working') stopped.push({ key: tabId, handle, at })
+          if (prev && turnOf(prev.state, prev.main) === 'working' && turnOf(a.state, main) !== 'working') stopped.push({ key: tabId, handle, at })
         }
         if (state.cards[tabId]?.sessionId) (a.activity?.unread ? unread : read).push(tabId)
       }
@@ -1129,41 +1141,47 @@ export default function activate(orca: OrcaWorkerApi): void {
       // Unseen mark: set when an agent stops working while you are not looking at it,
       // cleared as soon as it works again.
       // A loop finishing one of its runs is not news.
-      const needsYou = prev?.state === 'working' && state !== 'working' && !(await liveMonitor(terminalId))
-      if (state !== 'working' && !needsYou) {
+      // The turn, not Orca's overall state: background work after the answer does not hold it back.
+      const turn = turnOf(state, main)
+      const was = prev ? turnOf(prev.state, prev.main) : undefined
+      const said = (s: AgentState | undefined, m: AgentState | null | undefined) =>
+        s === undefined ? 'no record' : turnOf(s, m) !== s ? `${turnOf(s, m)} (background still working)` : s
+      const needsYou = was === 'working' && turn !== 'working' && !(await liveMonitor(terminalId))
+      if (turn !== 'working' && !needsYou) {
         // Worth a line: a checked chat that stops without this being "news" opens no reply box.
         const k = keyOfHandle(terminalId)
-        if (k && (await loadBoard()).cards[k]?.watch) orca.log(`checked chat ${k.slice(0, 8)}: ${prev?.state ?? 'no record'} -> ${state}, not news`)
+        if (k && (await loadBoard()).cards[k]?.watch) orca.log(`checked chat ${k.slice(0, 8)}: ${said(prev?.state, prev?.main)} -> ${said(state, main)}, not news`)
         return
       }
       let board = await refresh()
       const key = keyOfHandle(terminalId)
       if (!key) return
       if (board.cards[key]?.watch) {
-        orca.log(`checked chat ${key.slice(0, 8)}: ${prev?.state ?? 'no record'} -> ${state}${visible.has(key) ? ', on screen' : ''}`)
+        orca.log(`checked chat ${key.slice(0, 8)}: ${said(prev?.state, prev?.main)} -> ${said(state, main)}${visible.has(key) ? ', on screen' : ''}`)
       }
       // A turn of a second or two: the listing just made for this "working" already has the turn's
       // end and marked it. This event is then the stale one, and must not take that mark away
       // (the end's own event will find nothing new and say nothing).
-      const over = state === 'working' && (await loadStatus())[terminalId]?.state !== 'working'
+      const latest = (await loadStatus())[terminalId]
+      const over = turn === 'working' && !!latest && turnOf(latest.state, latest.main) !== 'working'
       if (over) {
         if (board.cards[key]?.watch) orca.log(`checked chat ${key.slice(0, 8)}: that turn is over already, its mark stays`)
         post('board.changed', await view(board))
         return
       }
       let next =
-        state === 'working'
+        turn === 'working'
           ? markUnseen(board, [key], null)
           : visible.has(key) && !board.cards[key]?.watch
             ? board
             : markUnseen(board, [key], receivedAt)
       // The chat went on while a drafted reply was on offer: unless the board hears within a moment
       // that the reply just sent was that draft, it was not used.
-      if (state === 'working' && prev?.state !== 'working' && board.cards[key]?.judge?.draft && !board.cards[key]?.judge?.used) {
+      if (turn === 'working' && was !== 'working' && board.cards[key]?.judge?.draft && !board.cards[key]?.judge?.used) {
         setTimeout(() => void mutate((s) => dropUnusedDraft(s, key)).catch(() => undefined), DROP_AFTER_MS)
       }
       // You started talking to a Backlog chat (not a loop waking up by itself): it is in progress now.
-      if (state === 'working' && prev?.state !== 'working' && !(await liveMonitor(terminalId)) && (await autoMoveOn())) {
+      if (turn === 'working' && was !== 'working' && !(await liveMonitor(terminalId)) && (await autoMoveOn())) {
         next = startInProgress(next, key)
       }
       if (next !== board) {

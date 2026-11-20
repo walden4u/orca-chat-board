@@ -1009,7 +1009,25 @@ test("Orca's monitoring mode (working overall, main turn done) reaches the card"
   const card = ((await worker.request('board.get', {})) as BoardView).cards[0]
   assert.equal(card.state, 'working')
   assert.equal(card.mainState, 'done')
-  assert.equal(card.unseenAt ?? null, null, 'still working: not news yet')
+  // The answer is out, maybe a question: news, though background work goes on (2026-11-20).
+  assert.equal(card.unseenAt, 20, "the main agent's turn is over: news")
+  // You answer: the main agent works again, and the mark goes.
+  await worker.emit('agent.status.changed', {
+    workspaceId: null, paneKey: 'p', terminalId: 'term_1', state: 'working', receivedAt: 30,
+    mainAgent: { state: 'working', stateStartedAt: 30 }
+  })
+  assert.equal(((await worker.request('board.get', {})) as BoardView).cards[0].unseenAt ?? null, null)
+  // The background work ending later, the main turn still over: nothing new.
+  await worker.emit('agent.status.changed', {
+    workspaceId: null, paneKey: 'p', terminalId: 'term_1', state: 'working', receivedAt: 40,
+    mainAgent: { state: 'done', outcome: 'success', stateStartedAt: 40 }
+  })
+  await worker.request('card.seen', { key: 'tab1' })
+  await worker.emit('agent.status.changed', {
+    workspaceId: null, paneKey: 'p', terminalId: 'term_1', state: 'done', receivedAt: 50,
+    mainAgent: { state: 'done', outcome: 'success', stateStartedAt: 40 }
+  })
+  assert.equal(((await worker.request('board.get', {})) as BoardView).cards[0].unseenAt ?? null, null, 'background ending after the turn: not news again')
   await worker.deactivate()
 })
 
