@@ -57,6 +57,12 @@ export type JudgeCheck = { command: string; code: number | null; ms: number; tai
  * A chat's goal as its folder holds it: the checklist in GOAL.md, which the agent writes and ticks
  * off. Read from the file at each listing, never stored on the card.
  */
+/**
+ * A command you can type after "/" in a chat of Claude Code that is not one of its built-in ones:
+ * a command or skill of yours (`user`), of the chat's project (`project`), or of a plugin.
+ */
+export type SlashCommand = { name: string; about: string; from: 'user' | 'project' | 'plugin'; hint?: string }
+
 export type GoalFile = {
   title: string | null
   done: number
@@ -199,6 +205,12 @@ declare module 'orca' {
      * nothing is pressed (`changed`).
      */
     'menu.pick': { input: { key: string; index: number; label: string }; output: { ok: boolean; error: 'closed' | 'chat-tab' | 'changed' | string | null } }
+    /**
+     * What the chat's Claude Code offers after "/" besides its built-in commands: your commands and
+     * skills and those of your plugins, as the server's worker last read them from Claude's folders.
+     * They are read the first time and with `refresh`, never otherwise.
+     */
+    'commands.list': { input: { key: string; refresh?: boolean }; output: { commands: SlashCommand[]; at: number | null; error: string | null } }
     /** Turns the Workspace Board sync on or off (the same setting as in Orca's Settings). */
     'sync.set': { input: { on: boolean }; output: BoardView }
     /** Shows the chat's terminal tab in Orca. */
