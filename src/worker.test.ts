@@ -5,6 +5,7 @@ import { setOrcaRunner } from './cli.ts'
 import { setToolRunner } from './tools.ts'
 import { sessionsOf, setSessionCheck, setSessionsReader } from './sessions.ts'
 import { setClicker } from './keys.ts'
+import { setSlashDisk } from './slash.ts'
 import { activeTabsByWorktree, cleanTitle, defaultColumns, emptyBoard, mergeChats, moveCard, setColumns, type LiveTerminal } from './board.ts'
 import type { BoardView, CardView } from './protocol.ts'
 import { looksBusy, suggestionOf } from './screen.ts'
@@ -63,6 +64,7 @@ afterEach(() => {
   setToolRunner(null)
   setSessionsReader(noSessions)
   setSessionCheck(null)
+  setSlashDisk(null)
 })
 
 test('new agent chats land in the first column; plain shells are skipped', async () => {
@@ -1385,4 +1387,68 @@ test('a session Claude has not saved is neither noted nor resumed by its number'
   await closeAndReopen(second, 'tab12')
   assert.deepEqual(sent().at(-1), ['term_13', '--text=/resume'])
   await second.deactivate()
+})
+
+test('the commands for "/" are read from Claude\'s folders once, and again only when asked', async () => {
+  fakeCli(() => [term(1), term(2, { worktreePath: '/Users/me/other' })])
+  setToolRunner(
+    async () => ({ stdout: '', stderr: '', code: 0 }),
+    () => true
+  )
+  // Claude's own folder is a made-up one for this test, wherever this machine's home is.
+  const env = process.env as Record<string, string | undefined>
+  env['CLAUDE_CONFIG_DIR'] = '/cfg'
+  const files: Record<string, string> = { '/cfg/skills/mine/SKILL.md': '---\ndescription: A skill of mine\n---\n', '/Users/me/toolbox/.claude/commands/ship.md': 'Ship it' }
+  let reads = 0
+  const flat = (path: string) => path.replace(/\\/g, '/')
+  setSlashDisk({
+    list: async (dir) => {
+      reads++
+      const names = new Set<string>()
+      for (const path of Object.keys(files)) if (path.startsWith(`${flat(dir)}/`)) names.add(path.slice(flat(dir).length + 1).split('/')[0]!)
+      return names.size ? [...names] : null
+    },
+    read: async (path) => (reads++, files[flat(path)] ?? null)
+  })
+  const worker = await mountWorker(main, { host: host() })
+  await worker.request('board.get', { refresh: true })
+  const first = await worker.request('commands.list', { key: 'tab1' })
+  assert.deepEqual(first.commands, [
+    { name: 'ship', about: 'Ship it', from: 'project' },
+    { name: 'mine', about: 'A skill of mine', from: 'user' }
+  ])
+  assert.equal(first.error, null)
+  // Asked again: answered from what was kept, nothing read.
+  const before = reads
+  assert.deepEqual((await worker.request('commands.list', { key: 'tab1' })).commands, first.commands)
+  assert.equal(reads, before)
+  // A chat in a folder not read yet: that folder is read, once.
+  assert.deepEqual((await worker.request('commands.list', { key: 'tab2' })).commands, [{ name: 'mine', about: 'A skill of mine', from: 'user' }])
+  const afterOther = reads
+  assert.ok(afterOther > before)
+  await worker.request('commands.list', { key: 'tab2' })
+  assert.equal(reads, afterOther)
+  // A new skill shows only after a refresh, which reads for every open chat.
+  files['/cfg/skills/fresh/SKILL.md'] = '---\ndescription: Made just now\n---\n'
+  files['/Users/me/other/.claude/commands/theirs.md'] = 'Of the other folder'
+  assert.equal((await worker.request('commands.list', { key: 'tab1' })).commands.length, 2)
+  const again = await worker.request('commands.list', { key: 'tab1', refresh: true })
+  assert.deepEqual(
+    again.commands.map((c) => c.name),
+    ['ship', 'mine', 'fresh']
+  )
+  assert.deepEqual(
+    (await worker.request('commands.list', { key: 'tab2' })).commands.map((c) => c.name),
+    ['theirs', 'mine', 'fresh']
+  )
+  const kept = worker.host.data().storage as Record<string, unknown>
+  await worker.deactivate()
+  // Kept across a restart of the worker: the next one reads nothing.
+  const afterRefresh = reads
+  const next = await mountWorker(main, { host: host(kept) })
+  await next.request('board.get', { refresh: true })
+  assert.equal((await next.request('commands.list', { key: 'tab1' })).commands.length, 3)
+  assert.equal(reads, afterRefresh)
+  await next.deactivate()
+  delete env['CLAUDE_CONFIG_DIR']
 })

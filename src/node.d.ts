@@ -31,6 +31,11 @@ declare module 'node:fs' {
   export function unlinkSync(path: string): void
 }
 
+declare module 'node:fs/promises' {
+  export function readdir(path: string): Promise<string[]>
+  export function readFile(path: string, encoding: 'utf8'): Promise<string>
+}
+
 declare var Buffer: {
   from(data: string, encoding: 'base64' | 'utf8'): Uint8Array
   concat(list: Uint8Array[]): Uint8Array & { toString(encoding: 'utf8'): string }

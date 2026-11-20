@@ -396,6 +396,8 @@ function showReply(c: CardView, how: 'click' | 'auto' | 'next' | 'arrow' = 'clic
       canJudge: goalMode,
       // Splitting and running a goal are prompts for Claude Code in a terminal (`/goal` is its command).
       canGoal: goalMode && c.agent === 'claude' && !c.sessionId,
+      // Claude Code in a terminal: its commands are offered after "/" in the box's field.
+      slash: c.agent === 'claude' && !c.sessionId,
       goalFile: goalMode ? c.goalFile : null,
       judge: goalMode ? (c.judge ?? null) : null,
       tally: goalMode ? (c.drafts ?? null) : null,

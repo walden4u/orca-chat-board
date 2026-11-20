@@ -1,8 +1,9 @@
 // Reply box: a card's whole last exchange (your prompt, the agent's reply) with a field to answer
 // it. Send types your text into that chat's terminal as the next prompt; nothing is sent before.
 // The box lives outside the board, so the board's redraws never touch what you are typing.
-import type { DraftTally, GoalFile, JudgeState, ScreenMenu } from '../src/protocol.ts'
+import type { DraftTally, GoalFile, JudgeState, ScreenMenu, SlashCommand } from '../src/protocol.ts'
 import { t } from './i18n.ts'
+import { allCommands, matchCommands, type SlashRow } from './commands.ts'
 import { loadPreview, plain, richText } from './preview.ts'
 
 export type ReplyTarget = {
@@ -13,6 +14,8 @@ export type ReplyTarget = {
   canJudge: boolean
   /** Goal mode, for an agent that has `/goal` (Claude Code in a terminal): the box can split a goal and run it. */
   canGoal: boolean
+  /** A chat of Claude Code in a terminal: its commands are offered while the field holds just "/word". */
+  slash: boolean
   /** The checklist in the chat's folder (GOAL.md), if it has one. */
   goalFile: GoalFile | null
   /** The last review of this chat's work, if any, and how its drafts were used so far. */
@@ -426,7 +429,10 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
   send.disabled = readOnly
   const row = node('div', 'reply-row')
   row.append(split, run, review, finish, status, next, send)
-  foot.append(shelf, input, row)
+  // The commands to pick from while the field holds just "/word" (see `showSlash`).
+  const slashBox = node('div', 'reply-slash')
+  slashBox.hidden = true
+  foot.append(shelf, slashBox, input, row)
 
   dialog.append(head, body, foot)
   backdrop.append(dialog)
@@ -557,7 +563,134 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     })
     menuBox.append(list, node('div', 'reply-hint', t.menuHint))
   }
+  // The commands of the chat's Claude Code, offered while the field holds just "/word", as its
+  // terminal offers them (asked for on 2026-11-20). The built-in ones are known here. Yours come
+  // from the worker, which keeps what it read from Claude's folders: they are read again only
+  // when you take the list's last row, so nothing is read while you type.
+  let slashOwn: SlashCommand[] = []
+  let slashAsked = false
+  let slashReading = false
+  let slashRows: SlashRow[] = []
+  /** The row the keys are on. None: Enter sends what is typed, as it always did. */
+  let slashAt: number | null = null
+  /** The row you went to with the arrow keys, while the text stays what it is. */
+  let slashPick: string | null = null
+  /** The text at which Escape closed the list: closed until you type again. */
+  let slashShut: string | null = null
+  /** What the list was last drawn for: the same text keeps where it was scrolled to. */
+  let slashFor: string | null = null
+  const REFRESH = 'refresh'
+  const rowKey = (r: SlashRow) => (r.refresh ? ' refresh' : r.name)
+  const slashWord = (): string | null =>
+    target.slash && !readOnly && !busy && input.value !== filled && input.value !== slashShut && /^\/\S*$/.test(input.value) ? input.value.slice(1) : null
+  const loadSlash = async (again: boolean) => {
+    if (slashReading) return
+    slashReading = true
+    if (again) status.textContent = t.slashReading
+    try {
+      const r = await orca.plugin.request('commands.list', { key: target.key, refresh: again })
+      if (!open) return
+      slashOwn = Array.isArray(r?.commands) ? r.commands : []
+      if (again) status.textContent = r.error ? t.slashFailed(r.error) : t.slashRead(slashOwn.length)
+    } catch (err) {
+      if (open && again) status.textContent = t.slashFailed((err as Error).message)
+    } finally {
+      slashReading = false
+      if (open) showSlash()
+    }
+  }
+  const showSlash = () => {
+    const word = slashWord()
+    const before = word !== null && word === slashFor ? (slashBox.querySelector('.reply-slash-list')?.scrollTop ?? 0) : 0
+    slashFor = word
+    slashBox.hidden = word === null
+    slashBox.textContent = ''
+    slashRows = []
+    slashAt = null
+    if (word === null) return
+    // Asked once a box: the worker answers from what it kept, at once.
+    if (!slashAsked) {
+      slashAsked = true
+      void loadSlash(false)
+    }
+    const found = matchCommands(allCommands(slashOwn), word)
+    slashRows = [...found, { name: REFRESH, hint: '', about: t.slashRefreshAbout, also: [], refresh: true }]
+    const picked = slashPick === null ? -1 : slashRows.findIndex((r) => rowKey(r) === slashPick)
+    const w = word.toLowerCase()
+    // By itself the first command is marked only when its name begins with what you typed: a name
+    // the list does not know is then sent as you wrote it. "/refresh" in full is the last row.
+    const first = found[0]
+    const begins = !!first && (first.name.toLowerCase().startsWith(w) || first.name.toLowerCase().split(':').some((p) => p.startsWith(w)) || first.also.some((a) => a.startsWith(w)))
+    slashAt = picked >= 0 ? picked : begins ? 0 : !found.some((r) => r.name === REFRESH) && w === REFRESH ? found.length : null
+    const list = node('div', 'reply-slash-list')
+    slashRows.forEach((r, i) => {
+      const b = node('button', `ghost reply-slash-row${i === slashAt ? ' marked' : ''}${r.refresh ? ' refresh' : ''}`)
+      b.type = 'button'
+      b.tabIndex = -1
+      b.append(node('span', 'reply-slash-name', r.refresh ? t.slashRefresh : `/${r.name}`))
+      if (r.hint) b.append(node('span', 'reply-slash-args', r.hint))
+      b.append(node('span', 'reply-slash-about', r.about))
+      b.title = r.about
+      // The field keeps the keys: a press on a row does not take them.
+      b.onmousedown = (e) => e.preventDefault()
+      b.onclick = () => takeSlash(r)
+      // The row that reads your commands again stays in sight under the list.
+      if (r.refresh) slashBox.append(list, b)
+      else list.append(b)
+    })
+    slashBox.append(node('div', 'reply-hint reply-slash-foot', t.slashHint))
+    list.scrollTop = before
+    const on = slashAt !== null && slashAt < found.length ? (list.children[slashAt] as HTMLElement) : null
+    if (on && on.offsetTop < list.scrollTop) list.scrollTop = on.offsetTop
+    else if (on && on.offsetTop + on.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = on.offsetTop + on.offsetHeight - list.clientHeight
+  }
+  /** A command is filled in, not sent: you may add to it, and Enter sends it. The last row reads your commands again. */
+  const takeSlash = (row: SlashRow) => {
+    if (row.refresh) {
+      // Typed as "/refresh": that word was this row's name, not a command for the chat.
+      if (`/${REFRESH}`.startsWith(input.value.toLowerCase())) input.value = '/'
+      void loadSlash(true)
+    } else input.value = `/${row.name} `
+    slashPick = null
+    input.focus()
+    advise()
+    showSlash()
+  }
+  input.addEventListener('input', () => {
+    slashPick = null
+    slashShut = null
+    showSlash()
+  })
   const onKey = (e: KeyboardEvent) => {
+    // The list of commands is open: up and down go through it, Enter or Tab takes the row they
+    // are on (a command is filled in; Enter sends once the field holds a command's whole name),
+    // Escape closes the list and leaves the box open.
+    if (!slashBox.hidden) {
+      const plain = !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && !e.isComposing && e.keyCode !== 229
+      if (e.key === 'Escape' || e.code === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        slashShut = input.value
+        showSlash()
+        return
+      }
+      const step = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0
+      if (step && plain) {
+        e.preventDefault()
+        e.stopPropagation()
+        const at = slashAt === null ? (step > 0 ? 0 : slashRows.length - 1) : (slashAt + step + slashRows.length) % slashRows.length
+        slashPick = rowKey(slashRows[at]!)
+        showSlash()
+        return
+      }
+      const row = slashAt === null ? null : slashRows[slashAt]
+      if ((e.key === 'Enter' || e.key === 'Tab') && plain && row && (row.refresh || e.key === 'Tab' || input.value !== `/${row.name}`)) {
+        e.preventDefault()
+        e.stopPropagation()
+        if (!e.repeat) takeSlash(row)
+        return
+      }
+    }
     // Also in the middle of a Korean syllable: there the key arrives as `Process`, and only `code`
     // says it was Escape. What you typed is kept for this chat either way.
     if ((e.key === 'Escape' || e.code === 'Escape') && !busy) return leave(handlers.onClosed)

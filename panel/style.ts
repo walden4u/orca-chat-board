@@ -295,6 +295,20 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .reply-menu-option.marked { border-color: var(--orca-primary); box-shadow: inset 3px 0 0 var(--orca-primary);
   background: color-mix(in srgb, var(--orca-primary) 22%, transparent); font-weight: 600; }
 .reply-menu-key { flex: none; font-weight: 700; color: var(--orca-muted-foreground); }
+/* The commands offered while the field holds just "/word": a row a command, under them the row that reads yours again. */
+.reply-slash { display: flex; flex-direction: column; border: 1px solid var(--orca-border); border-radius: 4px; }
+.reply-slash-list { position: relative; display: flex; flex-direction: column; max-height: 12.5em; overflow-y: auto; }
+.reply-slash-row { flex: none; display: flex; gap: 8px; align-items: baseline; text-align: left; padding: 2px 8px;
+  border: 0; border-radius: 0; white-space: nowrap; color: var(--orca-foreground); }
+.reply-slash-row.marked { box-shadow: inset 3px 0 0 var(--orca-primary);
+  background: color-mix(in srgb, var(--orca-primary) 22%, transparent); }
+.reply-slash-row.refresh { border-top: 1px solid var(--orca-border); }
+.reply-slash-name { flex: none; font-weight: 600; }
+.reply-slash-args { flex: 0 1 auto; min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; color: var(--orca-muted-foreground); }
+.reply-slash-about { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--orca-muted-foreground); }
+.reply-slash-foot { padding: 2px 8px; border-top: 1px solid var(--orca-border); }
+/* Both are flex boxes, which would show while hidden (the list of the screen did: an empty frame). */
+.reply-menu[hidden], .reply-slash[hidden] { display: none; }
 /* The goal button whose turn it is. */
 .reply-next.due { border-color: var(--orca-primary); color: var(--orca-foreground); font-weight: 600;
   background: color-mix(in srgb, var(--orca-primary) 16%, transparent); }

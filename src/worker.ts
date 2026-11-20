@@ -59,6 +59,7 @@ import { GOAL_FILE, parseGoalFile } from './goal.ts'
 import { joinPath, orcaRuntimeId } from './cli.ts'
 import { readClaudeSessions, sessionSaved } from './sessions.ts'
 import { keys, keysWhy, markedSpot, setMarkedSpot } from './keys.ts'
+import { folderKey, normalizeSlash, readFolderCommands, readUserCommands, unique, type StoredSlash } from './slash.ts'
 
 const BOARD_KEY = 'board'
 /** Which run of Orca the board last listed chats from. */
@@ -71,6 +72,8 @@ const STATUS_KEY = 'status'
 /** Where you last clicked in the panel (see keys.ts). */
 const KEYS_SPOT_KEY = 'keysSpot'
 const MONITORS_KEY = 'monitors'
+/** Your commands and skills as last read from Claude's folders (see slash.ts). */
+const SLASH_KEY = 'slashCommands'
 /** While synced, light refreshes re-read the workspace statuses at most this often. */
 const STATUS_POLL_MS = 10_000
 /** A prompt sent from the reply box travels as one command-line argument. */
@@ -768,6 +771,44 @@ export default function activate(orca: OrcaWorkerApi): void {
       orca.log(`menu pick failed: ${reason}`)
       return { ok: false, error: reason }
     }
+  })
+
+  // Reply box: the commands the chat's Claude Code offers after "/", besides its built-in ones (which
+  // the panel knows). Claude's folders are read the first time a list is asked for and when you
+  // refresh it (then for every open chat's folder at once), never in between: what was read is kept.
+  let slashTurn: Promise<unknown> = Promise.resolve()
+  handle('commands.list', ({ key, refresh: again }) => {
+    const answer = slashTurn.then(async () => {
+      if (refreshedAt === 0) await serial(refresh)
+      const host = { platform: process.platform, env: process.env }
+      const here = (folder: string | undefined): folder is string => !!folder && folderIsHere(folder)
+      const folder = here(folders[key]) ? folders[key]! : ''
+      let kept = normalizeSlash(await orca.storage.get(SLASH_KEY))
+      const listOf = (all: StoredSlash | null) => (all ? unique([...(all.folders[folderKey(host, folder)] ?? []), ...all.user]) : [])
+      try {
+        if (again === true || !kept) {
+          const began = Date.now()
+          const next: StoredSlash = { at: began, user: await readUserCommands(host), folders: {} }
+          // A refresh reads for every open chat; the first reading only for the chat that asked.
+          const wanted = again === true ? [...new Set([folder, ...Object.values(folders)].filter(here))] : folder ? [folder] : []
+          for (const dir of wanted) next.folders[folderKey(host, dir)] ??= await readFolderCommands(host, dir)
+          await orca.storage.set(SLASH_KEY, (kept = next))
+          const own = Object.values(next.folders).reduce((n, list) => n + list.length, 0)
+          orca.log(`commands for "/" read${again === true ? ' again' : ''}: ${next.user.length} of yours, ${own} in ${wanted.length} chat folder(s), ${Date.now() - began} ms`)
+        } else if (folder && !kept.folders[folderKey(host, folder)]) {
+          // A chat in a folder not read yet: that folder only, once.
+          kept = { ...kept, folders: { ...kept.folders, [folderKey(host, folder)]: await readFolderCommands(host, folder) } }
+          await orca.storage.set(SLASH_KEY, kept)
+        }
+      } catch (err) {
+        const reason = (err as Error).message.split('\n')[0] ?? ''
+        orca.log(`commands for "/" not read: ${reason}`)
+        return { commands: listOf(kept), at: kept?.at ?? null, error: reason }
+      }
+      return { commands: listOf(kept), at: kept.at, error: null }
+    })
+    slashTurn = answer.catch(() => undefined)
+    return answer
   })
 
   // ---------- goal mode: the goal file, and the judge ----------
