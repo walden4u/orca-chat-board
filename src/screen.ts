@@ -31,7 +31,22 @@ export type ScreenMenu = {
    * last, so that every other option keeps its number.
    */
   next?: number
+  /**
+   * The rows under the options that name keys: a setting changed with the left and right arrows
+   * ("● High effort ←/→ to adjust" under the list of models), and the line about Enter and Esc
+   * ("s to use this session only · Enter to save · Esc to cancel"). The reply box shows them as
+   * they are on the screen, with `keys` as buttons.
+   */
+  under?: string[]
+  keys?: MenuKey[]
 }
+
+/**
+ * A key the screen names for its list, besides the ones that pick an option. `press`: 'left',
+ * 'right', 'enter', 'esc', or the one letter to type. `says`: the screen's words for it. `row`:
+ * which of `under` it stands in.
+ */
+export type MenuKey = { press: string; says: string; row: number }
 
 // A permission request has no word about Enter under it, only "Esc to cancel · Tab to amend".
 // "esc to interrupt" is a running turn's hint, not a list's.
@@ -153,7 +168,52 @@ export function menuOf(rows: readonly string[]): ScreenMenu | null {
   }
   while (asked.length && !asked[0]) asked.shift()
   while (asked.length && !asked[asked.length - 1]) asked.pop()
-  return { question: asked.join('\n').replace(/\n{3,}/g, '\n\n').slice(0, 1500), options, at, numbered: !!own, ...(next === undefined ? {} : { next }) }
+  // The keys the screen names under the options. Tab ("to amend" a permission) and combinations are left to the terminal.
+  const under: string[] = []
+  const keys: MenuKey[] = []
+  for (let i = first; i < foot; i++) {
+    const row = all[i]!.trim()
+    if (!/←\/→ to \S/.test(row)) continue
+    under.push(row)
+    keys.push({ press: 'left', says: '←', row: under.length - 1 }, { press: 'right', says: '→', row: under.length - 1 })
+  }
+  const line = all[foot]?.trim()
+  if (line) {
+    under.push(line)
+    for (const part of line.split('·').map((p) => p.trim())) {
+      const named = /^(\S+) to \S/.exec(part)?.[1] ?? ''
+      const press = /^enter$/i.test(named) ? 'enter' : /^esc$/i.test(named) ? 'esc' : /^[a-z]$/i.test(named) ? named : ''
+      if (press && !keys.some((k) => k.press === press)) keys.push({ press, says: part, row: under.length - 1 })
+    }
+  }
+  return {
+    question: asked.join('\n').replace(/\n{3,}/g, '\n\n').slice(0, 1500),
+    options,
+    at,
+    numbered: !!own,
+    ...(next === undefined ? {} : { next }),
+    ...(under.length ? { under, keys } : {})
+  }
+}
+
+const KEY_BYTES: Record<string, string> = { left: '\x1b[D', right: '\x1b[C', enter: '\r', esc: '\x1b' }
+
+/**
+ * The writes that press one of the keys the screen names for its list (`MenuKey.press`), or null
+ * when the list has no such key. With `to`, the screen's pointer is first moved to that option
+ * (the arrows): "s" and Enter act on the option the pointer is on. All seen to work on the list
+ * of models in Claude Code 2.1.329 (2026-11-20).
+ */
+export function keysForKey(menu: ScreenMenu, press: string, to?: number): string[] | null {
+  if (!menu.keys?.some((k) => k.press === press)) return null
+  const out: string[] = []
+  if (to !== undefined && to !== menu.at) {
+    if (!Number.isInteger(to) || to < 0 || to >= menu.options.length || to === menu.next) return null
+    const steps = to - menu.at
+    out.push((steps > 0 ? '\x1b[B' : '\x1b[A').repeat(Math.abs(steps)))
+  }
+  out.push(KEY_BYTES[press] ?? press)
+  return out
 }
 
 /**

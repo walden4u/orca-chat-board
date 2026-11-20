@@ -29,6 +29,7 @@ const REQUESTS = [
   'attach.drop',
   'chat.send',
   'menu.pick',
+  'menu.key',
   'commands.list',
   'judge.run',
   'judge.tally',

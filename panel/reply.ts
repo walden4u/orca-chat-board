@@ -570,7 +570,22 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
       b.onclick = () => void pick(i)
       list.append(b)
     })
-    menuBox.append(list, node('div', 'reply-hint', t.menuHint))
+    menuBox.append(list)
+    // What the screen says under its options, with the keys it names there as buttons: a setting's
+    // arrows beside its words ("● High effort ←/→ to adjust"), and the line about the keys as keys.
+    ;(menu.under ?? []).forEach((row, i) => {
+      const mine = (menu!.keys ?? []).filter((k) => k.row === i)
+      const line = node('div', 'reply-menu-under')
+      if (!mine.length || mine.some((k) => k.press === 'left' || k.press === 'right')) line.append(node('span', 'reply-menu-says', row))
+      for (const k of mine) {
+        const b = node('button', 'ghost reply-menu-press', k.says)
+        b.disabled = picking
+        b.onclick = () => void pressKey(k.press)
+        line.append(b)
+      }
+      menuBox.append(line)
+    })
+    menuBox.append(node('div', 'reply-hint', t.menuHint))
   }
   // The commands of the chat's Claude Code, offered while the field holds just "/word", as its
   // terminal offers them (asked for on 2026-11-20). The built-in ones are known here. Yours come
@@ -754,6 +769,36 @@ export function openReply(target: ReplyTarget, handlers: ReplyHandlers): void {
     e.preventDefault()
     e.stopPropagation()
     void pick(n - 1)
+  }
+  /**
+   * One of the keys the screen names for its list, pressed in the chat's terminal. A letter or
+   * Enter acts on the option the screen's pointer is on: when up and down marked another one
+   * here, the pointer is moved to it first.
+   */
+  const pressKey = async (press: string) => {
+    if (!open || picking || busy || !menu) return
+    const acts = press === 'enter' || press.length === 1
+    const to = acts && marked !== null && marked !== menu.at && marked !== menu.next ? marked : undefined
+    picking = true
+    commandAt = 0
+    showMenu()
+    status.textContent = ''
+    let result: { ok: boolean; error: string | null }
+    try {
+      result = await orca.plugin.request('menu.key', { key: target.key, press, ...(to === undefined ? {} : { to, label: menu.options[to]! }) })
+    } catch (err) {
+      result = { ok: false, error: (err as Error).message }
+    }
+    if (!open) return
+    if (!result.ok) status.textContent = result.error === 'changed' ? t.menuChanged : result.error === 'closed' ? t.chatClosed : t.menuFailed(result.error ?? '')
+    // The screen after the key: the setting as it is now, or the list gone.
+    setTimeout(
+      () => {
+        picking = false
+        if (open) loadExchange()
+      },
+      result.ok ? 600 : 0
+    )
   }
   // Pictures: pasted or dropped here, handed to the worker in pieces, attached to the prompt on Send.
   type Picture = { id: string; url: string; ready: boolean; thumb: HTMLElement }
