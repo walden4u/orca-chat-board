@@ -1070,7 +1070,13 @@ export default function activate(orca: OrcaWorkerApi): void {
         orca.log(`restore of ${key.slice(0, 8)} failed: ${(err as Error).message.split('\n').pop()}`)
       }
     }
-    if (opened) orca.log(`opened ${opened} chat(s) again after Orca restarted`)
+    if (!opened) return
+    orca.log(`opened ${opened} chat(s) again after Orca restarted`)
+    // Opening them took longer than the looks above (two minutes on 2026-11-23, and three of the
+    // chats were left without a tab): looked at again now that they are open.
+    for (const wait of [5_000, 30_000, 120_000]) {
+      setTimeout(() => void adoptOrphans().catch((err) => orca.log(`terminals without a tab not taken in: ${(err as Error).message.split('\n').pop()}`)), wait)
+    }
   }
 
   // An archived Claude chat, opened again from its card: a new Claude tab in its workspace (started
