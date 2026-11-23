@@ -125,13 +125,6 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
   border-color: color-mix(in srgb, #ff5fa2 80%, transparent);
   box-shadow: 0 0 0 1px color-mix(in srgb, #ff5fa2 60%, transparent);
 }
-/* The same, while the chat's background work still runs (the pulse icon): violet, apart from pink and from the blue of work. */
-.card.answer-background, .card.answer-background.active {
-  background: color-mix(in srgb, #9b6dff 26%, var(--orca-background));
-  border-color: color-mix(in srgb, #9b6dff 85%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, #9b6dff 60%, transparent);
-}
-.card.answer-background .status.monitoring, .card.answer-background .time.monitoring { color: #5b3fd6; }
 .toolbar.answer-due { border-bottom: 2px solid #ff5fa2; background: color-mix(in srgb, #ff5fa2 10%, transparent); }
 .unseen-dot {
   width: 8px; height: 8px; border-radius: 50%; flex: none; background: #f5c518; margin-top: 5px;
@@ -176,6 +169,11 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
 .card-meta:empty { display: none; }
 /* Time sits at the right edge, under the status icon. */
 .card-meta .time { margin-left: auto; font-variant-numeric: tabular-nums; }
+/* The status icon: in the middle of what the row has left, the time after it at the right edge. */
+.card-meta .status { width: 18px; height: 18px; margin: 0 auto; }
+.card-meta .status + .time { margin-left: 0; }
+/* On pink, the pulse of background work in a darker blue. */
+.card.answer-due .status.monitoring, .card.answer-due .time.monitoring { color: #1f55c9; }
 .chip { --c: #8b95a5; border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); border-radius: 3px; padding: 0 4px;
   background: color-mix(in srgb, var(--c) 14%, transparent); color: color-mix(in srgb, var(--c) 65%, var(--orca-foreground)); }
 .logo { width: 15px; height: 15px; display: inline-flex; flex: none; border-radius: 3px; }
