@@ -125,6 +125,13 @@ input:focus, textarea:focus, button:focus-visible, .card:focus-visible {
   border-color: color-mix(in srgb, #ff5fa2 80%, transparent);
   box-shadow: 0 0 0 1px color-mix(in srgb, #ff5fa2 60%, transparent);
 }
+/* The same, while the chat's background work still runs (the pulse icon): violet, apart from pink and from the blue of work. */
+.card.answer-background, .card.answer-background.active {
+  background: color-mix(in srgb, #9b6dff 26%, var(--orca-background));
+  border-color: color-mix(in srgb, #9b6dff 85%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, #9b6dff 60%, transparent);
+}
+.card.answer-background .status.monitoring, .card.answer-background .time.monitoring { color: #5b3fd6; }
 .toolbar.answer-due { border-bottom: 2px solid #ff5fa2; background: color-mix(in srgb, #ff5fa2 10%, transparent); }
 .unseen-dot {
   width: 8px; height: 8px; border-radius: 50%; flex: none; background: #f5c518; margin-top: 5px;
