@@ -312,6 +312,15 @@ function answerDue(c: CardView): boolean {
   return !!c.watch && !c.closed && (c.state === 'done' || c.state === 'waiting' || c.state === 'blocked')
 }
 
+/**
+ * A checked chat whose main agent has answered while its background work (shells, subagents) goes
+ * on: Orca still calls it working, so it is not pink. It gets a colour of its own, with the pulse
+ * icon. Not the rounds of a `/loop` (`monitor`), which wait for nobody.
+ */
+function answerInBackground(c: CardView): boolean {
+  return !!c.watch && !c.closed && !c.monitor && c.state === 'working' && (c.mainState === 'done' || c.mainState === 'waiting' || c.mainState === 'blocked')
+}
+
 /** A checked chat that finished and was not seen yet: its reply box is due to open. */
 function isWaiting(c: CardView): boolean {
   if (!c.watch || c.closed || !c.unseenAt || c.unseenAt === readHere.get(c.key)) return false
@@ -571,7 +580,7 @@ function renderCard(c: CardView): HTMLElement {
   const card = el(
     'div',
     {
-      class: `card${c.closed ? ' closed' : kind ? ` st-${kind}` : ''}${c.unseenAt && !c.closed ? ' unseen' : ''}${c.active ? ' active' : ''}${pinkWaiting && answerDue(c) ? ' answer-due' : ''}`,
+      class: `card${c.closed ? ' closed' : kind ? ` st-${kind}` : ''}${c.unseenAt && !c.closed ? ' unseen' : ''}${c.active ? ' active' : ''}${pinkWaiting && answerDue(c) ? ' answer-due' : ''}${pinkWaiting && answerInBackground(c) ? ' answer-background' : ''}`,
       draggable: !c.closed && editingCard !== c.key ? 'true' : false,
       tabindex: '0',
       'data-key': c.key,
