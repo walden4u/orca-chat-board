@@ -309,16 +309,12 @@ function watchMark(c: CardView): HTMLElement {
 
 /** A checked chat whose agent is not working: it finished or asked, and the next word is yours. */
 function answerDue(c: CardView): boolean {
-  return !!c.watch && !c.closed && (c.state === 'done' || c.state === 'waiting' || c.state === 'blocked')
-}
-
-/**
- * A checked chat whose main agent has answered while its background work (shells, subagents) goes
- * on: Orca still calls it working, so it is not pink. It gets a colour of its own, with the pulse
- * icon. Not the rounds of a `/loop` (`monitor`), which wait for nobody.
- */
-function answerInBackground(c: CardView): boolean {
-  return !!c.watch && !c.closed && !c.monitor && c.state === 'working' && (c.mainState === 'done' || c.mainState === 'waiting' || c.mainState === 'blocked')
+  if (!c.watch || c.closed) return false
+  if (c.state === 'done' || c.state === 'waiting' || c.state === 'blocked') return true
+  // The main agent has answered while background work (shells, subagents) goes on: Orca calls the
+  // chat working (the pulse icon), but the answer is yours to read. Orca does not say what runs or
+  // whether the agent waits for it, so there is no colour apart. Not the rounds of a `/loop`.
+  return !c.monitor && c.state === 'working' && (c.mainState === 'done' || c.mainState === 'waiting' || c.mainState === 'blocked')
 }
 
 /** A checked chat that finished and was not seen yet: its reply box is due to open. */
@@ -580,7 +576,7 @@ function renderCard(c: CardView): HTMLElement {
   const card = el(
     'div',
     {
-      class: `card${c.closed ? ' closed' : kind ? ` st-${kind}` : ''}${c.unseenAt && !c.closed ? ' unseen' : ''}${c.active ? ' active' : ''}${pinkWaiting && answerDue(c) ? ' answer-due' : ''}${pinkWaiting && answerInBackground(c) ? ' answer-background' : ''}`,
+      class: `card${c.closed ? ' closed' : kind ? ` st-${kind}` : ''}${c.unseenAt && !c.closed ? ' unseen' : ''}${c.active ? ' active' : ''}${pinkWaiting && answerDue(c) ? ' answer-due' : ''}`,
       draggable: !c.closed && editingCard !== c.key ? 'true' : false,
       tabindex: '0',
       'data-key': c.key,
@@ -591,8 +587,7 @@ function renderCard(c: CardView): HTMLElement {
       { class: 'card-top' },
       !c.closed ? watchMark(c) : null,
       c.unseenAt && !c.closed ? el('span', { class: 'unseen-dot', title: t.unseen, role: 'img', 'aria-label': t.unseen }) : null,
-      el('span', { class: 'card-title' }, titleOf(c)),
-      stateBadge
+      el('span', { class: 'card-title' }, titleOf(c))
     ),
     el(
       'div',
@@ -601,6 +596,8 @@ function renderCard(c: CardView): HTMLElement {
       c.worktreeName && show.workspace ? el('span', { class: 'chip ws' }, c.worktreeName) : null,
       goalChip(c),
       c.label && c.title && c.label !== c.title ? el('span', {}, c.title) : null,
+      // In the bottom row, where the buttons that show over the card's top right do not cover it.
+      stateBadge,
       show.time && mon ? el('span', { class: `time ${kind}`, title: mon.title }, mon.text) : when && show.time ? el('span', { class: 'time' }, ago(when)) : null
     ),
     c.note && show.notes && editingCard !== c.key ? el('div', { class: 'note' }, c.note) : null
